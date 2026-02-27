@@ -6,10 +6,14 @@
     <meta name="google" content="notranslate">
     <title>Finanças C&B</title>
     <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <style>
         body { background-color: #0f172a; color: white; font-family: sans-serif; -webkit-tap-highlight-color: transparent; }
         input, select { color: #1e293b !important; border: none !important; outline: none !important; }
@@ -22,42 +26,66 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        function App() {
-            // Carrega os dados salvos no próprio celular
-            const [lancamentos, setLancamentos] = useState(() => {
-                const salvo = localStorage.getItem('financas_cb_local');
-                return salvo ? JSON.parse(salvo) : [];
-            });
+        // CONFIGURAÇÃO OFICIAL - BASEADA NOS SEUS PRINTS
+        const supabase = supabasejs.createClient(
+            'https://ufzpaufqyassaijzjxbx.supabase.co', 
+            'sb_publishable_TCzTxtiuc5eNhwowt05DhA_uoB37669288f62c64b553e18585e94b0f49007f3e'
+        );
 
+        function App() {
+            const [lancamentos, setLancamentos] = useState([]);
+            const [status, setStatus] = useState('Sincronizando...');
             const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio' });
+            
             const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
             const [mesIdx, setMesIdx] = useState(new Date().getMonth());
             const mesAtual = meses[mesIdx];
 
-            // Toda vez que a lista mudar, salva no celular
-            useEffect(() => {
-                localStorage.setItem('financas_cb_local', JSON.stringify(lancamentos));
-            }, [lancamentos]);
+            const carregarDados = async () => {
+                try {
+                    const { data, error } = await supabase.from('fluxo').select('*').order('created_at', { ascending: false });
+                    if (error) throw error;
+                    setLancamentos(data || []);
+                    setStatus('Sincronizado');
+                } catch (e) {
+                    console.error(e);
+                    setStatus('Erro de Conexão');
+                }
+            };
 
-            const salvar = (e) => {
+            useEffect(() => {
+                carregarDados();
+                const interval = setInterval(carregarDados, 5000); // Atualiza sozinho a cada 5s
+                return () => clearInterval(interval);
+            }, []);
+
+            const salvar = async (e) => {
                 e.preventDefault();
                 if (!form.descricao || !form.valor) return;
                 
-                const novo = {
-                    ...form,
-                    id: Date.now(),
+                setStatus('Salvando...');
+                const { error } = await supabase.from('fluxo').insert([{
+                    descricao: form.descricao,
                     valor: parseFloat(form.valor),
+                    tipo: form.tipo,
+                    usuario: form.usuario,
                     mes: mesAtual,
                     data_formatada: new Date().toLocaleDateString('pt-BR')
-                };
+                }]);
 
-                setLancamentos([novo, ...lancamentos]);
-                setForm({ ...form, descricao: '', valor: '' });
+                if (!error) {
+                    setForm({ ...form, descricao: '', valor: '' });
+                    carregarDados();
+                } else {
+                    alert("Erro ao salvar! Verifique a tabela no Supabase.");
+                    setStatus('Erro ao salvar');
+                }
             };
 
-            const apagar = (id) => {
-                if(confirm("Deseja apagar este registro?")) {
-                    setLancamentos(lancamentos.filter(i => i.id !== id));
+            const apagar = async (id) => {
+                if(confirm("Deseja apagar esse lançamento?")) {
+                    const { error } = await supabase.from('fluxo').delete().eq('id', id);
+                    if (!error) carregarDados();
                 }
             };
 
@@ -69,10 +97,12 @@
                     <header className="py-8 text-center">
                         <div className="flex justify-between items-center mb-6 px-4 font-bold text-xs opacity-50 uppercase tracking-widest notranslate">
                             <button onClick={() => setMesIdx(mesIdx > 0 ? mesIdx - 1 : 11)}>❮</button>
-                            <span>{mesAtual}</span>
+                            <span className="bg-slate-800 px-3 py-1 rounded-full">{mesAtual}</span>
                             <button onClick={() => setMesIdx(mesIdx < 11 ? mesIdx + 1 : 0)}>❯</button>
                         </div>
-                        <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">Saldo Local (Modo de Teste)</p>
+                        <p className={`text-[10px] uppercase font-bold mb-1 tracking-widest ${status === 'Sincronizado' ? 'text-slate-500' : 'text-yellow-500'}`}>
+                            {status}
+                        </p>
                         <h1 className={`text-5xl font-black transition-colors ${saldoGeral >= 0 ? 'text-green-400' : 'text-red-500'}`}>
                             R$ {saldoGeral.toFixed(2)}
                         </h1>
@@ -87,10 +117,8 @@
                                 </button>
                             ))}
                         </div>
-                        
-                        <input type="text" placeholder="Descrição (ex: Aluguel)" className="w-full p-4 mb-3 bg-slate-50 rounded-2xl text-sm font-medium outline-none" 
+                        <input type="text" placeholder="O que foi?" className="w-full p-4 mb-3 bg-slate-50 rounded-2xl text-sm font-medium outline-none" 
                             value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} />
-                        
                         <div className="flex gap-2">
                             <input type="number" step="0.01" placeholder="Valor" className="w-1/2 p-4 bg-slate-50 rounded-2xl font-bold text-lg outline-none"
                                 value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} />
@@ -100,9 +128,8 @@
                                 <option value="entrada">GANHO 💰</option>
                             </select>
                         </div>
-
-                        <button className="w-full mt-6 bg-slate-900 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-transform shadow-lg">
-                            Salvar no Aparelho
+                        <button className="w-full mt-6 bg-slate-900 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-transform">
+                            Lançar Registro
                         </button>
                     </form>
 
@@ -117,7 +144,7 @@
                                     <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-400' : 'text-red-400'}`}>
                                         {i.tipo === 'entrada' ? '+' : '-'} {i.valor.toFixed(2)}
                                     </p>
-                                    <button onClick={() => apagar(i.id)} className="text-[10px] opacity-20 hover:opacity-100 transition-opacity">🗑️</button>
+                                    <button onClick={() => apagar(i.id)} className="opacity-20 hover:opacity-100 transition-opacity">🗑️</button>
                                 </div>
                             </div>
                         ))}
