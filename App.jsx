@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 
 function App() {
@@ -6,10 +6,63 @@ function App() {
   const [showModal, setShowModal] = useState(false);
   const [lancamentos, setLancamentos] = useState([]);
   const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio' });
+  const [carregandoFoto, setCarregandoFoto] = useState(false);
   
+  // URLs padrões caso não tenha foto
+  const fotoPadrao = "https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png";
+  const [urlFotoCelio, setUrlFotoCelio] = useState(fotoPadrao);
+  const [urlFotoBrenda, setUrlFotoBrenda] = useState(fotoPadrao);
+
+  const fileInputRef = useRef(null); // Referência para o input de arquivo escondido
+  const [usuarioSelecionadoParaFoto, setUsuarioSelecionadoParaFoto] = useState(null);
+
   const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
   const [mesIdx, setMesIdx] = useState(new Date().getMonth());
   const mesAtual = meses[mesIdx];
+
+  // Função para buscar as fotos do Storage
+  const carregarFotosPerfil = async () => {
+    // Busca foto do Célio
+    const { data: dataCelio } = supabase.storage.from('perfis').getPublicUrl('celio.png');
+    if (dataCelio) setUrlFotoCelio(`${dataCelio.publicUrl}?t=${new Date().getTime()}`); // Cache bust
+
+    // Busca foto da Brenda
+    const { data: dataBrenda } = supabase.storage.from('perfis').getPublicUrl('brenda.png');
+    if (dataBrenda) setUrlFotoBrenda(`${dataBrenda.publicUrl}?t=${new Date().getTime()}`); // Cache bust
+  };
+
+  // Função para lidar com o upload da foto
+  const handleUploadFoto = async (event) => {
+    const file = event.target.files[0];
+    if (!file || !usuarioSelecionadoParaFoto) return;
+
+    setCarregandoFoto(true);
+    const nomeArquivo = usuarioSelecionadoParaFoto.toLowerCase() === 'célio' ? 'celio.png' : 'brenda.png';
+
+    // 1. Faz o upload para o Bucket 'perfis'
+    // Usamos 'upsert: true' para sobrescrever a foto antiga
+    const { error } = await supabase.storage
+      .from('perfis')
+      .upload(nomeArquivo, file, { upsert: true });
+
+    if (error) {
+      alert("Erro ao subir foto: " + error.message);
+    } else {
+      // 2. Atualiza a URL na tela
+      await carregarFotosPerfil();
+    }
+
+    setCarregandoFoto(false);
+    setUsuarioSelecionadoParaFoto(null); // Limpa seleção
+  };
+
+  // Função para iniciar o processo de troca de foto
+  const iniciarTrocaFoto = (usuario) => {
+    if(confirm(`Alterar a foto de perfil de ${usuario}?`)){
+      setUsuarioSelecionadoParaFoto(usuario);
+      fileInputRef.current.click(); // Clica no input escondido
+    }
+  };
 
   const carregar = async () => {
     const { data } = await supabase.from('fluxo').select('*').order('created_at', { ascending: false });
@@ -18,6 +71,7 @@ function App() {
 
   useEffect(() => {
     carregar();
+    carregarFotosPerfil(); // Carrega as fotos ao abrir o app
     const timer = setInterval(carregar, 5000);
     return () => clearInterval(timer);
   }, []);
@@ -52,11 +106,25 @@ function App() {
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col bg-[#0f1014] text-white p-6 font-sans selection:bg-pink-500">
       
-      {/* HEADER PERSONALIZADO COM FOTOS */}
+      {/* INPUT DE ARQUIVO ESCONDIDO */}
+      <input type="file" accept="image/*" ref={fileInputRef} onChange={handleUploadFoto} className="hidden" />
+
+      {/* HEADER PERSONALIZADO COM FOTOS CLICÁVEIS */}
       <header className="flex justify-between items-center py-4 mb-2">
-        <div className="flex -space-x-3">
-          <div className="w-12 h-12 rounded-full border-2 border-blue-500 overflow-hidden bg-slate-800 flex items-center justify-center text-[10px] font-bold">CÉLIO</div>
-          <div className="w-12 h-12 rounded-full border-2 border-pink-500 overflow-hidden bg-slate-800 flex items-center justify-center text-[10px] font-bold uppercase">BRENDA</div>
+        <div className="flex -space-x-3 relative">
+          {carregandoFoto && (
+            <div className="absolute inset-0 bg-black/50 rounded-full z-10 flex items-center justify-center text-[8px] animate-pulse">🆙</div>
+          )}
+          {/* Foto do Célio */}
+          <button onClick={() => iniciarTrocaFoto('Célio')} className="w-14 h-14 rounded-full border-2 border-blue-500 overflow-hidden bg-slate-800 flex items-center justify-center group relative">
+            <img src={urlFotoCelio} className="w-full h-full object-cover group-hover:opacity-50 transition-opacity" alt="Célio" />
+            <span className="absolute text-[8px] font-bold opacity-0 group-hover:opacity-100 uppercase">Alterar</span>
+          </button>
+          {/* Foto da Brenda */}
+          <button onClick={() => iniciarTrocaFoto('Brenda')} className="w-14 h-14 rounded-full border-2 border-pink-500 overflow-hidden bg-slate-800 flex items-center justify-center group relative">
+            <img src={urlFotoBrenda} className="w-full h-full object-cover group-hover:opacity-50 transition-opacity" alt="Brenda" />
+            <span className="absolute text-[8px] font-bold opacity-0 group-hover:opacity-100 uppercase">Alterar</span>
+          </button>
         </div>
         <div className="text-right">
           <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest">{mesAtual}</p>
@@ -78,7 +146,7 @@ function App() {
       </div>
 
       {/* NAV DE ABAS COM ESTILO MODERNO */}
-      <nav className="flex gap-2 mb-8 bg-white/5 p-1.5 rounded-[1.5rem] backdrop-blur-md border border-white/5">
+      <nav className="flex gap-2 mb-8 bg-white/5 p-1.5 rounded-[1.5rem] backdrop-blur-md border border-white/5 relative z-20">
         {['GERAL', 'CÉLIO', 'BRENDA', 'CICLO'].map(t => (
           <button key={t} onClick={() => setAba(t)}
             className={`flex-1 py-2.5 rounded-xl text-[9px] font-black transition-all duration-300 ${aba === t ? 'bg-white text-black shadow-lg scale-105' : 'text-white/40 hover:text-white/70'}`}>
