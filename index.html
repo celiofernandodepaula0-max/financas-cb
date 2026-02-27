@@ -10,83 +10,124 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        body { background-color: #0f172a; color: white; font-family: sans-serif; -webkit-tap-highlight-color: transparent; }
+        input, select { color: #1e293b !important; border: none !important; outline: none !important; }
+        .notranslate { unicode-bidi: bidi-override; }
+    </style>
 </head>
-<body class="bg-[#0f172a] text-white">
+<body class="bg-slate-900">
     <div id="root"></div>
+
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // URL corrigida baseada no seu Project ID (image_bacfba.png)
-        const supabase = supabasejs.createClient(
-            'https://ufzpaufqyassaijzjxbx.supabase.co', 
-            'sb_publishable_TCzTxtiuc5eNhwowt05DhA_uoB37669288f62c64b553e18585e94b0f49007f3e'
-        );
-
         function App() {
-            const [lancamentos, setLancamentos] = useState([]);
+            // Carrega os dados salvos no próprio celular
+            const [lancamentos, setLancamentos] = useState(() => {
+                const salvo = localStorage.getItem('financas_cb_local');
+                return salvo ? JSON.parse(salvo) : [];
+            });
+
             const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio' });
-            const [loading, setLoading] = useState(true);
             const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
-            const mesAtual = meses[new Date().getMonth()];
+            const [mesIdx, setMesIdx] = useState(new Date().getMonth());
+            const mesAtual = meses[mesIdx];
 
-            const carregar = async () => {
-                const { data, error } = await supabase.from('fluxo').select('*').order('created_at', { ascending: false });
-                if (!error && data) setLancamentos(data);
-                setLoading(false);
-            };
+            // Toda vez que a lista mudar, salva no celular
+            useEffect(() => {
+                localStorage.setItem('financas_cb_local', JSON.stringify(lancamentos));
+            }, [lancamentos]);
 
-            useEffect(() => { carregar(); }, []);
-
-            const salvar = async (e) => {
+            const salvar = (e) => {
                 e.preventDefault();
                 if (!form.descricao || !form.valor) return;
-                const { error } = await supabase.from('fluxo').insert([{
-                    ...form, valor: parseFloat(form.valor), mes: mesAtual, data_formatada: new Date().toLocaleDateString('pt-BR')
-                }]);
-                if (!error) { setForm({ ...form, descricao: '', valor: '' }); carregar(); }
-                else { alert("Erro: Verifique se a coluna existe no banco."); }
+                
+                const novo = {
+                    ...form,
+                    id: Date.now(),
+                    valor: parseFloat(form.valor),
+                    mes: mesAtual,
+                    data_formatada: new Date().toLocaleDateString('pt-BR')
+                };
+
+                setLancamentos([novo, ...lancamentos]);
+                setForm({ ...form, descricao: '', valor: '' });
             };
 
-            const saldo = lancamentos.reduce((acc, i) => i.tipo === 'entrada' ? acc + i.valor : acc - i.valor, 0);
+            const apagar = (id) => {
+                if(confirm("Deseja apagar este registro?")) {
+                    setLancamentos(lancamentos.filter(i => i.id !== id));
+                }
+            };
 
-            if (loading) return <div className="h-screen flex items-center justify-center italic opacity-30">Conectando ao Banco...</div>;
+            const saldoGeral = lancamentos.reduce((acc, i) => i.tipo === 'entrada' ? acc + i.valor : acc - i.valor, 0);
+            const itensMes = lancamentos.filter(i => i.mes === mesAtual);
 
             return (
-                <div className="max-w-md mx-auto p-4 min-h-screen">
-                    <header className="py-10 text-center">
-                        <h1 className={`text-5xl font-black ${saldo >= 0 ? 'text-green-400' : 'text-red-500'}`}>R$ {saldo.toFixed(2)}</h1>
-                        <p className="text-xs opacity-50 uppercase mt-2 tracking-widest">{mesAtual}</p>
+                <div className="max-w-md mx-auto min-h-screen flex flex-col p-4">
+                    <header className="py-8 text-center">
+                        <div className="flex justify-between items-center mb-6 px-4 font-bold text-xs opacity-50 uppercase tracking-widest notranslate">
+                            <button onClick={() => setMesIdx(mesIdx > 0 ? mesIdx - 1 : 11)}>❮</button>
+                            <span>{mesAtual}</span>
+                            <button onClick={() => setMesIdx(mesIdx < 11 ? mesIdx + 1 : 0)}>❯</button>
+                        </div>
+                        <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">Saldo Local (Modo de Teste)</p>
+                        <h1 className={`text-5xl font-black transition-colors ${saldoGeral >= 0 ? 'text-green-400' : 'text-red-500'}`}>
+                            R$ {saldoGeral.toFixed(2)}
+                        </h1>
                     </header>
+
                     <form onSubmit={salvar} className="bg-white p-6 rounded-[2.5rem] shadow-2xl mb-8">
                         <div className="flex gap-2 mb-4 p-1 bg-slate-100 rounded-2xl">
                             {['Célio', 'Brenda'].map(u => (
                                 <button key={u} type="button" onClick={() => setForm({...form, usuario: u})}
-                                    className={`flex-1 py-3 rounded-xl font-black text-[10px] ${form.usuario === u ? (u === 'Célio' ? 'bg-blue-600 text-white shadow-md' : 'bg-pink-500 text-white shadow-md') : 'text-slate-400'}`}>{u.toUpperCase()}</button>
+                                    className={`flex-1 py-3 rounded-xl font-black text-[10px] transition-all ${form.usuario === u ? (u === 'Célio' ? 'bg-blue-600 text-white shadow-md' : 'bg-pink-500 text-white shadow-md') : 'text-slate-400'}`}>
+                                    {u.toUpperCase()}
+                                </button>
                             ))}
                         </div>
-                        <input type="text" placeholder="O que foi?" className="w-full p-4 mb-3 bg-slate-50 rounded-2xl text-slate-900 outline-none" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} />
+                        
+                        <input type="text" placeholder="Descrição (ex: Aluguel)" className="w-full p-4 mb-3 bg-slate-50 rounded-2xl text-sm font-medium outline-none" 
+                            value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} />
+                        
                         <div className="flex gap-2">
-                            <input type="number" placeholder="Valor" className="w-1/2 p-4 bg-slate-50 rounded-2xl text-slate-900 font-bold outline-none" value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} />
-                            <select className="w-1/2 p-4 bg-slate-50 rounded-2xl text-slate-900 font-bold outline-none" value={form.tipo} onChange={e => setForm({...form, tipo: e.target.value})}>
+                            <input type="number" step="0.01" placeholder="Valor" className="w-1/2 p-4 bg-slate-50 rounded-2xl font-bold text-lg outline-none"
+                                value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} />
+                            <select className="w-1/2 p-4 bg-slate-50 rounded-2xl font-bold text-xs outline-none"
+                                value={form.tipo} onChange={e => setForm({...form, tipo: e.target.value})}>
                                 <option value="despesa">GASTO 💸</option>
                                 <option value="entrada">GANHO 💰</option>
                             </select>
                         </div>
-                        <button className="w-full mt-6 bg-slate-900 text-white py-4 rounded-2xl font-black text-xs shadow-lg uppercase">Lançar Online</button>
+
+                        <button className="w-full mt-6 bg-slate-900 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-transform shadow-lg">
+                            Salvar no Aparelho
+                        </button>
                     </form>
+
                     <div className="space-y-3 pb-10">
-                        {lancamentos.map(i => (
-                            <div key={i.id} className="bg-slate-800/50 p-4 rounded-2xl flex justify-between items-center border border-slate-700/50">
-                                <div><p className="font-bold text-sm">{i.descricao}</p><p className="text-[9px] font-bold text-slate-500 uppercase">{i.usuario} • {i.data_formatada}</p></div>
-                                <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-400' : 'text-red-400'}`}>{i.tipo === 'entrada' ? '+' : '-'} {i.valor.toFixed(2)}</p>
+                        {itensMes.map(i => (
+                            <div key={i.id} className="bg-slate-800/50 p-4 rounded-2xl flex justify-between items-center border border-slate-700/50 backdrop-blur-sm shadow-sm">
+                                <div>
+                                    <p className="font-bold text-sm text-slate-100 leading-tight">{i.descricao}</p>
+                                    <p className="text-[9px] font-bold text-slate-500 uppercase notranslate">{i.usuario} • {i.data_formatada}</p>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-400' : 'text-red-400'}`}>
+                                        {i.tipo === 'entrada' ? '+' : '-'} {i.valor.toFixed(2)}
+                                    </p>
+                                    <button onClick={() => apagar(i.id)} className="text-[10px] opacity-20 hover:opacity-100 transition-opacity">🗑️</button>
+                                </div>
                             </div>
                         ))}
                     </div>
                 </div>
             );
         }
-        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
