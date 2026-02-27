@@ -1,203 +1,109 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
 
 function App() {
-  const [aba, setAba] = useState('GERAL');
-  const [showModal, setShowModal] = useState(false);
-  const [modalType, setModalType] = useState('gasto'); // 'gasto', 'renda' ou 'meta'
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [tema, setTema] = useState('dark');
+  const [aba, setAba] = useState('DASHBOARD');
   const [lancamentos, setLancamentos] = useState([]);
-  const [rendas, setRendas] = useState([]);
   const [metas, setMetas] = useState([]);
-  const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', data: '' });
-  
-  const [urlFotoCelio, setUrlFotoCelio] = useState("https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png");
-  const [urlFotoBrenda, setUrlFotoBrenda] = useState("https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png");
+  const [config, setConfig] = useState({ saldo_inicial: 0 });
+  const [form, setForm] = useState({ titulo: '', valor: '', data: '', tipo: 'despesa' });
 
-  const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
-  const [mesIdx, setMesIdx] = useState(new Date().getMonth());
-  const mesAtual = meses[mesIdx];
-
-  const carregarDados = async () => {
+  const carregarTudo = async () => {
     const { data: f } = await supabase.from('fluxo').select('*').order('created_at', { ascending: false });
-    const { data: r } = await supabase.from('rendas').select('*');
-    const { data: m } = await supabase.from('planejamentos').select('*').order('data', { ascending: true });
+    const { data: m } = await supabase.from('planejamentos').select('*');
+    const { data: c } = await supabase.from('configuracoes').select('*').single();
     if (f) setLancamentos(f);
-    if (r) setRendas(r);
     if (m) setMetas(m);
+    if (c) { setConfig(c); setTema(c.tema); }
   };
 
-  useEffect(() => {
-    carregarDados();
-    const timer = setInterval(carregarDados, 10000);
-    return () => clearInterval(timer);
-  }, []);
+  useEffect(() => { carregarTudo(); }, []);
 
-  const salvarGeral = async (e) => {
-    e.preventDefault();
-    const v = parseFloat(String(form.valor).replace(',', '.'));
-    
-    if (modalType === 'gasto') {
-      await supabase.from('fluxo').insert([{ descricao: form.descricao, valor: v, tipo: form.tipo, usuario: form.usuario, mes: mesAtual }]);
-    } else if (modalType === 'renda') {
-      await supabase.from('rendas').upsert([{ usuario: form.usuario, valor: v }], { onConflict: 'usuario' });
-    } else if (modalType === 'meta') {
-      await supabase.from('planejamentos').insert([{ titulo: form.descricao, valor: v, data: form.data }]);
-    }
+  const totalGastos = lancamentos.reduce((acc, i) => i.tipo === 'despesa' ? acc + Number(i.valor) : acc, 0);
+  const totalEntradas = lancamentos.reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc, 0);
+  const saldoAtual = Number(config.saldo_inicial) + totalEntradas - totalGastos;
 
-    setForm({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', data: '' });
-    setShowModal(false);
-    carregarDados();
-  };
-
-  // Cálculos de Saúde Financeira
-  const filtroMes = lancamentos.filter(i => i.mes === mesAtual);
-  const totalRendas = rendas.reduce((acc, i) => acc + Number(i.valor), 0);
-  const totalGastosMes = filtroMes.filter(i => i.tipo === 'despesa').reduce((acc, i) => acc + Number(i.valor), 0);
-  const totalMetas = metas.reduce((acc, i) => acc + Number(i.valor), 0);
-  const saldoReal = totalRendas - totalGastosMes;
+  const bgClass = tema === 'dark' ? 'bg-[#0a0b0e] text-white' : 'bg-slate-50 text-slate-900';
+  const cardClass = tema === 'dark' ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm';
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-[#0a0b0e] text-white p-6 font-sans">
+    <div className={`max-w-md mx-auto min-h-screen transition-colors duration-500 ${bgClass} font-sans relative overflow-hidden`}>
       
-      {/* DASHBOARD - SAÚDE FINANCEIRA */}
-      <header className="mb-8">
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex -space-x-3">
-            <div className="w-12 h-12 rounded-full border-2 border-blue-500 bg-slate-800 overflow-hidden"><img src={urlFotoCelio} className="object-cover h-full w-full"/></div>
-            <div className="w-12 h-12 rounded-full border-2 border-pink-500 bg-slate-800 overflow-hidden"><img src={urlFotoBrenda} className="object-cover h-full w-full"/></div>
-          </div>
-          <div className="text-right">
-            <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest">{mesAtual}</p>
-            <h2 className="text-lg font-black text-purple-400">FINANÇAS CB</h2>
+      {/* MENU LATERAL OCULTO */}
+      <div className={`fixed inset-y-0 left-0 w-64 bg-slate-900 z-50 transform ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 shadow-2xl p-6`}>
+        <button onClick={() => setIsMenuOpen(false)} className="absolute top-6 right-6 text-2xl">✕</button>
+        <div className="mt-12 space-y-6">
+          <h3 className="text-xs font-black opacity-30 tracking-widest uppercase text-white">Menu Principal</h3>
+          <button onClick={() => {setAba('DASHBOARD'); setIsMenuOpen(false)}} className="block w-full text-left font-bold text-lg text-white">🏠 Dashboard</button>
+          <button onClick={() => {setAba('OBJETIVOS'); setIsMenuOpen(false)}} className="block w-full text-left font-bold text-lg text-white">🎯 Metas de Vida</button>
+          <button onClick={() => {setAba('PERFIL'); setIsMenuOpen(false)}} className="block w-full text-left font-bold text-lg text-white">👤 Perfil do Casal</button>
+          <div className="pt-6 border-t border-white/10">
+            <button onClick={() => setTema(tema === 'dark' ? 'light' : 'dark')} className="text-xs font-bold text-blue-400">🌗 MUDAR PARA MODO {tema === 'dark' ? 'CLARO' : 'ESCURO'}</button>
           </div>
         </div>
+      </div>
 
-        <div className="bg-gradient-to-br from-gray-900 to-black p-6 rounded-[2rem] border border-white/10 shadow-2xl">
-          <p className="text-[10px] font-bold opacity-50 mb-1">SAÚDE FINANCEIRA (DISPONÍVEL)</p>
-          <h1 className={`text-4xl font-black ${saldoReal < 500 ? 'text-orange-400' : 'text-green-400'}`}>
-            R$ {saldoReal.toLocaleString('pt-BR')}
-          </h1>
-          <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-white/5">
-            <div>
-              <p className="text-[8px] opacity-40 uppercase">Renda Fixa</p>
-              <p className="text-xs font-bold text-blue-400">R$ {totalRendas.toFixed(2)}</p>
-            </div>
-            <div>
-              <p className="text-[8px] opacity-40 uppercase">Metas/Viagens</p>
-              <p className="text-xs font-bold text-yellow-400">R$ {totalMetas.toFixed(2)}</p>
-            </div>
-          </div>
+      {/* HEADER FIXO */}
+      <header className="p-6 flex justify-between items-center">
+        <button onClick={() => setIsMenuOpen(true)} className="text-2xl font-bold">☰</button>
+        <div className="flex flex-col items-end">
+           <span className="text-[10px] font-black opacity-40 uppercase tracking-widest">Olá, Casal Célio & Brenda</span>
+           <div className="w-10 h-10 rounded-full border-2 border-purple-500 bg-slate-800 overflow-hidden mt-1">
+              {/* Foto única do casal vira aqui */}
+              <div className="w-full h-full flex items-center justify-center text-[8px] font-bold">CB</div>
+           </div>
         </div>
       </header>
 
-      {/* ABAS PRINCIPAIS */}
-      <nav className="flex gap-2 mb-8 bg-white/5 p-1 rounded-2xl border border-white/5">
-        {['GERAL', 'CÉLIO', 'BRENDA'].map(t => (
-          <button key={t} onClick={() => setAba(t)} className={`flex-1 py-3 rounded-xl text-[10px] font-black transition-all ${aba === t ? 'bg-white text-black shadow-lg' : 'text-white/30'}`}>
-            {t}
-          </button>
-        ))}
-      </nav>
-
-      <main className="space-y-6 pb-24">
-        {aba === 'BRENDA' && (
-          <section className="animate-in fade-in slide-in-from-top-4">
-            <div className="bg-pink-600/10 border border-pink-500/20 p-6 rounded-3xl mb-6">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-pink-400 font-black text-xs uppercase tracking-widest">🌸 Ciclo Menstrual</h3>
-                <span className="bg-pink-500 text-[8px] px-2 py-1 rounded-full font-bold">FASE FOLICULAR</span>
-              </div>
-              <div className="flex gap-2">
-                {[1,2,3,4,5,6,7].map(d => <div key={d} className={`flex-1 h-1 rounded-full ${d < 4 ? 'bg-pink-500' : 'bg-white/10'}`}></div>)}
-              </div>
-              <p className="text-[10px] mt-4 opacity-60 italic text-center">Faltam 12 dias para o próximo ciclo.</p>
+      {/* CONTEÚDO CENTRAL (DASH) */}
+      <main className="px-6 pb-24">
+        {aba === 'DASHBOARD' && (
+          <div className="animate-in fade-in zoom-in duration-500">
+            <div className={`p-8 rounded-[3rem] border ${cardClass} mb-8 text-center relative overflow-hidden`}>
+              <div className="absolute -top-10 -right-10 w-32 h-32 bg-purple-500/10 rounded-full blur-3xl"></div>
+              <p className="text-[10px] font-black opacity-50 uppercase tracking-tighter mb-2 italic">Saúde Financeira Atual</p>
+              <h1 className="text-5xl font-black tracking-tighter">R$ {saldoAtual.toLocaleString('pt-BR')}</h1>
+              <p className="text-[9px] mt-4 opacity-40 uppercase font-bold tracking-widest">Ponto Zero: R$ {config.saldo_inicial}</p>
             </div>
-          </section>
-        )}
 
-        {/* SEÇÃO DE PLANEJAMENTOS (METAS) - APARECE NA GERAL */}
-        {aba === 'GERAL' && metas.length > 0 && (
-          <section>
-            <p className="text-[10px] font-black opacity-30 mb-3 uppercase tracking-widest">Próximos Sonhos ✈️</p>
-            {metas.map(m => (
-              <div key={m.id} className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-2xl flex justify-between items-center mb-2">
-                <div>
-                  <p className="font-bold text-xs">{m.titulo}</p>
-                  <p className="text-[8px] opacity-50 uppercase">{new Date(m.data).toLocaleDateString('pt-BR')}</p>
-                </div>
-                <p className="font-black text-yellow-500 text-xs">R$ {Number(m.valor).toFixed(2)}</p>
-              </div>
-            ))}
-          </section>
-        )}
-
-        {/* LISTA DE GASTOS */}
-        <section>
-          <p className="text-[10px] font-black opacity-30 mb-3 uppercase tracking-widest">Extrato de {aba}</p>
-          <div className="space-y-3">
-            {filtroMes
-              .filter(i => aba === 'GERAL' ? true : i.usuario.toUpperCase() === aba)
-              .map(i => (
-                <div key={i.id} className="bg-white/[0.03] p-4 rounded-2xl flex justify-between items-center border border-white/5">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs ${i.tipo === 'entrada' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                      {i.tipo === 'entrada' ? '💰' : '💸'}
+            <div className="space-y-4">
+               <h3 className="text-[10px] font-black opacity-30 uppercase tracking-[0.2em]">Fluxo de Caixa</h3>
+               {lancamentos.slice(0, 5).map(i => (
+                 <div key={i.id} className={`p-5 rounded-3xl border ${cardClass} flex justify-between items-center`}>
+                    <div className="flex items-center gap-4">
+                       <span className={`text-xl ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>{i.tipo === 'entrada' ? '●' : '○'}</span>
+                       <div>
+                          <p className="font-bold text-sm">{i.descricao}</p>
+                          <p className="text-[9px] opacity-40 uppercase font-bold">{i.usuario}</p>
+                       </div>
                     </div>
-                    <div>
-                      <p className="font-bold text-xs">{i.descricao}</p>
-                      <p className="text-[8px] opacity-30 uppercase">{i.usuario} • {i.data_formatada}</p>
-                    </div>
-                  </div>
-                  <p className={`font-black text-xs ${i.tipo === 'entrada' ? 'text-green-400' : 'text-red-400'}`}>
-                    R$ {Number(i.valor).toFixed(2)}
-                  </p>
-                </div>
-              ))}
+                    <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-400' : 'text-red-400'}`}>R$ {Number(i.valor).toFixed(2)}</p>
+                 </div>
+               ))}
+            </div>
           </div>
-        </section>
+        )}
+
+        {aba === 'PERFIL' && (
+          <div className="p-6 rounded-3xl border border-white/10 bg-white/5 space-y-6">
+             <h3 className="font-black text-xl italic uppercase">Configurações de Casal</h3>
+             <div>
+                <label className="text-[10px] font-black opacity-40 uppercase">Saldo Inicial (Ponto 0)</label>
+                <input type="number" className="w-full bg-black/20 p-4 rounded-xl mt-1 border border-white/10 outline-none font-bold" 
+                  value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} />
+                <button onClick={async () => await supabase.from('configuracoes').upsert({id: 1, saldo_inicial: config.saldo_inicial})} className="mt-2 text-[10px] font-black text-green-400 uppercase tracking-widest">💾 Salvar Ponto Zero</button>
+             </div>
+          </div>
+        )}
       </main>
 
-      {/* BOTÕES DE AÇÃO RÁPIDA */}
-      <div className="fixed bottom-6 right-6 flex flex-col gap-3">
-        <button onClick={() => { setModalType('renda'); setShowModal(true); }} className="bg-blue-600 w-12 h-12 rounded-full shadow-xl flex items-center justify-center text-lg border-2 border-black">💵</button>
-        <button onClick={() => { setModalType('meta'); setShowModal(true); }} className="bg-yellow-500 w-12 h-12 rounded-full shadow-xl flex items-center justify-center text-lg border-2 border-black">✈️</button>
-        <button onClick={() => { setModalType('gasto'); setShowModal(true); }} className="bg-pink-500 w-16 h-16 rounded-full shadow-2xl flex items-center justify-center text-2xl font-bold border-4 border-black">+</button>
-      </div>
+      {/* BOTÃO FLUTUANTE DE LANÇAMENTO */}
+      <button className="fixed bottom-8 right-8 w-16 h-16 bg-white text-black rounded-full shadow-2xl flex items-center justify-center text-2xl font-bold active:scale-90 transition-transform z-40">
+        +
+      </button>
 
-      {/* MODAL MULTIFUNÇÃO */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-end justify-center p-4">
-          <div className="w-full max-w-md bg-[#1a1b1f] rounded-[3rem] p-8 pb-12 border-t border-white/10">
-            <h3 className="text-white font-black text-lg mb-6 uppercase italic">
-              {modalType === 'gasto' ? 'Novo Lançamento' : (modalType === 'renda' ? 'Configurar Renda' : 'Planejar Meta')}
-            </h3>
-            <form onSubmit={salvarGeral} className="space-y-4">
-              {modalType !== 'meta' && (
-                <div className="flex gap-2 p-1 bg-white/5 rounded-2xl">
-                  {['Célio', 'Brenda'].map(u => (
-                    <button key={u} type="button" onClick={() => setForm({...form, usuario: u})}
-                      className={`flex-1 py-3 rounded-xl font-black text-[10px] transition-all ${form.usuario === u ? 'bg-white text-black' : 'text-white/30'}`}>
-                      {u.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <input type="text" placeholder={modalType === 'meta' ? "Ex: Viagem Março" : "Descrição"} className="w-full p-4 bg-white/5 rounded-2xl text-white outline-none border border-white/10" 
-                value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} />
-              <input type="number" placeholder="R$ 0,00" className="w-full p-4 bg-white/5 rounded-2xl text-white font-black text-xl outline-none border border-white/10"
-                value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} />
-              {modalType === 'meta' && (
-                <input type="date" className="w-full p-4 bg-white/5 rounded-2xl text-white outline-none border border-white/10"
-                  value={form.data} onChange={e => setForm({...form, data: e.target.value})} />
-              )}
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-4 font-bold text-xs opacity-50">CANCELAR</button>
-                <button type="submit" className="flex-[2] bg-white text-black py-4 rounded-2xl font-black text-xs uppercase shadow-xl">SALVAR</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
