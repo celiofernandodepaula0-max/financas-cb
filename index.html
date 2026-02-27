@@ -23,13 +23,13 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // --- LIGAÇÃO COM O DATABASE (CORRIGIDA) ---
-        // Extraímos o criador de conexões da biblioteca
-        const { createClient } = supabase; 
+        // --- CONEXÃO CORRIGIDA (FORA DO COMPONENTE) ---
+        const { createClient } = supabase;
         
+        // SUBSTITUA O TEXTO 'COLE_AQUI_A_CHAVE_ANON' PELA CHAVE QUE VOU TE ENSINAR A PEGAR ABAIXO
         const _supabase = createClient(
             'https://ufzpaufqyassaijzjxbx.supabase.co', 
-            'sb_publishable_TCzTxtiuc5eNhwowt05DhA_uoB37669288f62c64b553e18585e94b0f49007f3e'
+            'COLE_AQUI_A_CHAVE_ANON' 
         );
 
         function App() {
@@ -39,15 +39,14 @@
             const [mesIdx, setMesIdx] = useState(new Date().getMonth());
             const mesAtual = meses[mesIdx];
 
-            // Busca os dados da nuvem
             const carregar = async () => {
-                const { data, error } = await _supabase.from('fluxo').select('*').order('created_at', { ascending: false });
-                if (!error && data) setLancamentos(data);
+                const { data } = await _supabase.from('fluxo').select('*').order('created_at', { ascending: false });
+                if (data) setLancamentos(data);
             };
 
             useEffect(() => { 
                 carregar();
-                const timer = setInterval(carregar, 5000); // Sincroniza a cada 5 segundos
+                const timer = setInterval(carregar, 5000);
                 return () => clearInterval(timer);
             }, []);
 
@@ -55,12 +54,12 @@
                 e.preventDefault();
                 if (!form.descricao || !form.valor) return;
 
-                const valorLimpo = parseFloat(String(form.valor).replace(',', '.'));
+                // Aceita vírgula ou ponto
+                const valorNumerico = parseFloat(String(form.valor).replace(',', '.'));
 
-                // Envia para o Banco de Dados
                 const { error } = await _supabase.from('fluxo').insert([{
                     descricao: form.descricao,
-                    valor: valorLimpo,
+                    valor: valorNumerico,
                     tipo: form.tipo,
                     usuario: form.usuario,
                     mes: mesAtual,
@@ -100,30 +99,27 @@
                                 </button>
                             ))}
                         </div>
-                        
-                        <input type="text" placeholder="Descrição" className="w-full p-4 mb-3 bg-slate-50 rounded-2xl text-sm font-medium outline-none" 
+                        <input type="text" placeholder="Descrição" className="w-full p-4 mb-3 bg-slate-50 rounded-2xl text-sm font-medium outline-none text-slate-900" 
                             value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} />
-                        
                         <div className="flex gap-2">
                             <input type="text" inputMode="decimal" placeholder="0,00" className="w-1/2 p-4 bg-slate-50 rounded-2xl font-bold text-lg outline-none text-slate-900"
                                 value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} />
-                            <select className="w-1/2 p-4 bg-slate-50 rounded-2xl font-bold text-xs outline-none"
+                            <select className="w-1/2 p-4 bg-slate-50 rounded-2xl font-bold text-xs outline-none text-slate-900"
                                 value={form.tipo} onChange={e => setForm({...form, tipo: e.target.value})}>
                                 <option value="despesa">GASTO 💸</option>
                                 <option value="entrada">GANHO 💰</option>
                             </select>
                         </div>
-
-                        <button type="submit" className="w-full mt-6 bg-slate-900 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-lg active:scale-95 transition-transform">
+                        <button type="submit" className="w-full mt-6 bg-slate-900 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-lg">
                             Lançar Registro
                         </button>
                     </form>
 
-                    <div className="space-y-3 pb-10">
+                    <div className="space-y-3 pb-10 text-slate-100">
                         {itensMes.map(i => (
                             <div key={i.id} className="bg-slate-800/50 p-4 rounded-2xl flex justify-between items-center border border-slate-700/50">
                                 <div>
-                                    <p className="font-bold text-sm text-slate-100">{i.descricao}</p>
+                                    <p className="font-bold text-sm">{i.descricao}</p>
                                     <p className="text-[9px] font-bold text-slate-500 uppercase notranslate">{i.usuario} • {i.data_formatada}</p>
                                 </div>
                                 <div className="flex items-center gap-4">
