@@ -23,8 +23,11 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // Conexão com o seu banco (ufzp...)
-        const supabase = supabasejs.createClient(
+        // --- LIGAÇÃO COM O DATABASE (CORRIGIDA) ---
+        // Extraímos o criador de conexões da biblioteca
+        const { createClient } = supabase; 
+        
+        const _supabase = createClient(
             'https://ufzpaufqyassaijzjxbx.supabase.co', 
             'sb_publishable_TCzTxtiuc5eNhwowt05DhA_uoB37669288f62c64b553e18585e94b0f49007f3e'
         );
@@ -36,15 +39,15 @@
             const [mesIdx, setMesIdx] = useState(new Date().getMonth());
             const mesAtual = meses[mesIdx];
 
-            // Busca os dados do Supabase
+            // Busca os dados da nuvem
             const carregar = async () => {
-                const { data } = await supabase.from('fluxo').select('*').order('created_at', { ascending: false });
-                if (data) setLancamentos(data);
+                const { data, error } = await _supabase.from('fluxo').select('*').order('created_at', { ascending: false });
+                if (!error && data) setLancamentos(data);
             };
 
             useEffect(() => { 
                 carregar();
-                const timer = setInterval(carregar, 5000);
+                const timer = setInterval(carregar, 5000); // Sincroniza a cada 5 segundos
                 return () => clearInterval(timer);
             }, []);
 
@@ -52,12 +55,12 @@
                 e.preventDefault();
                 if (!form.descricao || !form.valor) return;
 
-                // CORREÇÃO DO BOTÃO: Tratando o número e enviando ao banco
-                const valorNumerico = parseFloat(String(form.valor).replace(',', '.'));
+                const valorLimpo = parseFloat(String(form.valor).replace(',', '.'));
 
-                const { error } = await supabase.from('fluxo').insert([{
+                // Envia para o Banco de Dados
+                const { error } = await _supabase.from('fluxo').insert([{
                     descricao: form.descricao,
-                    valor: valorNumerico,
+                    valor: valorLimpo,
                     tipo: form.tipo,
                     usuario: form.usuario,
                     mes: mesAtual,
@@ -68,7 +71,7 @@
                     setForm({ ...form, descricao: '', valor: '' });
                     carregar();
                 } else {
-                    alert("Erro ao salvar: " + error.message);
+                    alert("Erro no Banco: " + error.message);
                 }
             };
 
@@ -127,7 +130,7 @@
                                     <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-400' : 'text-red-400'}`}>
                                         {i.tipo === 'entrada' ? '+' : '-'} {i.valor.toFixed(2)}
                                     </p>
-                                    <button onClick={async () => { if(confirm("Apagar?")) { await supabase.from('fluxo').delete().eq('id', i.id); carregar(); } }} className="opacity-20 hover:opacity-100 transition-opacity">🗑️</button>
+                                    <button onClick={async () => { if(confirm("Apagar?")) { await _supabase.from('fluxo').delete().eq('id', i.id); carregar(); } }} className="opacity-20 hover:opacity-100 transition-opacity">🗑️</button>
                                 </div>
                             </div>
                         ))}
