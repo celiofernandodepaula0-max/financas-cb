@@ -6,6 +6,14 @@ function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   
+  // SISTEMA DE NOTIFICAÇÕES (TOAST)
+  const [toast, setToast] = useState(null);
+  
+  const mostrarAviso = (mensagem, tipo = 'info') => {
+    setToast({ mensagem, tipo });
+    setTimeout(() => setToast(null), 4000); // Some depois de 4 segundos
+  };
+
   const [tema, setTema] = useState(() => localStorage.getItem('@financasCB:tema') || 'dark');
   const [fotoUrl, setFotoUrl] = useState(() => localStorage.getItem('@financasCB:foto') || null);
   
@@ -36,32 +44,21 @@ function App() {
   const [salvandoFoto, setSalvandoFoto] = useState(false);
   const fileInputRef = useRef(null);
 
-  // --- SENSOR DE SWIPE (DESLIZAR TELA) ---
+  // SENSOR DE SWIPE
   const [touchStart, setTouchStart] = useState(null);
   const [touchEnd, setTouchEnd] = useState(null);
   const minSwipeDistance = 50;
 
-  const onTouchStart = (e) => {
-    setTouchEnd(null);
-    setTouchStart(e.targetTouches[0].clientX);
-  };
-
-  const onTouchMove = (e) => {
-    setTouchEnd(e.targetTouches[0].clientX);
-  };
-
+  const onTouchStart = (e) => { setTouchEnd(null); setTouchStart(e.targetTouches[0].clientX); };
+  const onTouchMove = (e) => { setTouchEnd(e.targetTouches[0].clientX); };
   const onTouchEnd = () => {
     if (!touchStart || !touchEnd) return;
     const distance = touchStart - touchEnd;
-    const isLeftSwipe = distance > minSwipeDistance;
-    const isRightSwipe = distance < -minSwipeDistance;
-
     if (aba !== 'CONFIG' && aba !== 'CONTRATOS') {
-      if (isLeftSwipe) irMesProximo();
-      if (isRightSwipe) irMesAnterior();
+      if (distance > minSwipeDistance) setDataFiltro(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+      if (distance < -minSwipeDistance) setDataFiltro(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
     }
   };
-  // ----------------------------------------
 
   const carregarDados = async () => {
     const { data: f } = await supabase.from('fluxo').select('*').order('data_lancamento', { ascending: false });
@@ -70,7 +67,17 @@ function App() {
     const { data: cb } = await supabase.from('ciclo_brenda').select('*').maybeSingle();
     
     if (f) { setLancamentos(f); localStorage.setItem('@financasCB:lancamentos', JSON.stringify(f)); }
-    if (ct) { setContratos(ct); localStorage.setItem('@financasCB:contratos', JSON.stringify(ct)); }
+    if (ct) { 
+      setContratos(ct); localStorage.setItem('@financasCB:contratos', JSON.stringify(ct)); 
+      
+      // VERIFICA CONTAS VENCENDO HOJE OU AMANHÃ
+      const diaHoje = new Date().getDate();
+      const temContaPerto = ct.some(conta => {
+        const diaConta = new Date(conta.data_inicio + 'T00:00:00').getDate();
+        return conta.tipo === 'despesa' && (diaConta === diaHoje || diaConta === diaHoje + 1 || diaConta === diaHoje - 1);
+      });
+      if (temContaPerto) mostrarAviso("Atenção: Tem conta fixa para vencer por esses dias! 🚨", "aviso");
+    }
     if (c) { 
       setConfig(c); localStorage.setItem('@financasCB:config', JSON.stringify(c));
       const temaBanco = c.tema || 'dark';
@@ -100,6 +107,7 @@ function App() {
     await supabase.storage.from('perfis').upload('casal.png', file, { upsert: true, cacheControl: '0' });
     setSalvandoFoto(false);
     carregarDados();
+    mostrarAviso("Foto atualizada com sucesso! 📸", "sucesso");
   };
 
   const salvarGasto = async (e) => {
@@ -111,8 +119,21 @@ function App() {
       escopo: form.escopo, previsibilidade: form.previsibilidade, data_lancamento: form.data 
     };
 
-    if (editingEntryId) await supabase.from('fluxo').update(dadosParaSalvar).eq('id', editingEntryId);
-    else await supabase.from('fluxo').insert([dadosParaSalvar]);
+    if (editingEntryId) {
+      await supabase.from('fluxo').update(dadosParaSalvar).eq('id', editingEntryId);
+      mostrarAviso("Lançamento alterado! ✏️", "info");
+    } else {
+      await supabase.from('fluxo').insert([dadosParaSalvar]);
+      
+      // A MÁGICA DAS FRASES DIVERTIDAS
+      if (form.tipo === 'entrada') {
+        mostrarAviso("Eita, bicho! Bora gastá! 🤑", "sucesso");
+      } else if (v > 500) {
+        mostrarAviso("Lá se vai nosso suado dinheirinho... 💸", "erro");
+      } else {
+        mostrarAviso("Gasto registrado com dor no coração! 📉", "erro");
+      }
+    }
     
     fecharModal(); carregarDados();
   };
@@ -123,7 +144,7 @@ function App() {
     const dados = { ...formContrato, valor: v };
     await supabase.from('contratos_fixos').insert([dados]);
     setFormContrato({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', escopo: 'casal', data_inicio: dataHoje });
-    alert("Conta Fixa ativada com sucesso!");
+    mostrarAviso("Conta Fixa ativada! Vai descontar sozinho agora. 🔁", "info");
     carregarDados();
   };
 
@@ -154,6 +175,7 @@ function App() {
     if (!editingEntryId) return;
     if (confirm("Apagar definitivamente este lançamento?")) {
       await supabase.from('fluxo').delete().eq('id', editingEntryId);
+      mostrarAviso("Lançamento apagado! 🗑️", "info");
       fecharModal(); carregarDados();
     }
   };
@@ -161,7 +183,7 @@ function App() {
   const salvarCiclo = async (e) => {
     e.preventDefault(); 
     await supabase.from('ciclo_brenda').upsert({ id: 1, ...ciclo });
-    alert("Dados do ciclo sincronizados com sucesso!"); 
+    mostrarAviso("Ciclo da patroa sincronizado! 🌸", "sucesso"); 
     carregarDados();
   };
 
@@ -170,9 +192,6 @@ function App() {
   const ultimoDiaDoMesVisualizado = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0).toISOString().split('T')[0];
   const nomeMeses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
   const nomeMesAtual = `${nomeMeses[dataFiltro.getMonth()]} ${dataFiltro.getFullYear()}`;
-
-  const irMesAnterior = () => setDataFiltro(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-  const irMesProximo = () => setDataFiltro(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
 
   const calcularMesesAtivos = (dataInicioStr) => {
     if (!dataInicioStr) return 0;
@@ -225,7 +244,7 @@ function App() {
   const despesasFixasMes = extratoCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Fixa').reduce((acc, i) => acc + Number(i.valor), 0);
   const despesasVariaveisMes = extratoCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Variável').reduce((acc, i) => acc + Number(i.valor), 0);
 
-  // MOTOR DO CICLO (DRAUZIO VARELLA)
+  // MOTOR DO CICLO
   let infoCiclo = { fase: "Aguardando dados...", cor: "text-gray-400", diasProxima: 0, ovulacaoData: '' };
   if (ciclo.data_inicio) {
     const hoje = new Date(); hoje.setHours(0,0,0,0);
@@ -259,6 +278,13 @@ function App() {
   return (
     <div className={`min-h-screen ${bgBody} ${textBody} font-sans overflow-x-hidden transition-colors duration-300`}>
       
+      {/* TOAST NOTIFICATION (BALÃOZINHO DE AVISO) */}
+      {toast && (
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl animate-in slide-in-from-top-4 fade-in duration-300 ${toast.tipo === 'sucesso' ? 'bg-green-500 text-black' : toast.tipo === 'erro' ? 'bg-red-500 text-white' : 'bg-purple-600 text-white'}`}>
+          {toast.mensagem}
+        </div>
+      )}
+
       {/* MENU LATERAL */}
       <div className={`fixed inset-y-0 left-0 w-72 ${bgMenu} z-50 transform ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-500 p-8`}>
         <div className="flex justify-between items-center mb-10">
@@ -289,18 +315,12 @@ function App() {
         </div>
       </header>
 
-      {/* ÁREA PRINCIPAL COM SENSOR DE SWIPE */}
-      <main 
-        onTouchStart={onTouchStart} 
-        onTouchMove={onTouchMove} 
-        onTouchEnd={onTouchEnd} 
-        className="max-w-md mx-auto px-6 pb-32"
-      >
+      <main onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} className="max-w-md mx-auto px-6 pb-32">
         {aba !== 'CONFIG' && aba !== 'CONTRATOS' && (
           <div className="flex justify-between items-center mb-6 px-4">
-             <button onClick={irMesAnterior} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❮</button>
+             <button onClick={() => setDataFiltro(new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() - 1, 1))} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❮</button>
              <span className="font-black text-sm uppercase tracking-widest">{nomeMesAtual}</span>
-             <button onClick={irMesProximo} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❯</button>
+             <button onClick={() => setDataFiltro(new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 1))} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❯</button>
           </div>
         )}
 
@@ -355,7 +375,7 @@ function App() {
                <h1 className="text-4xl font-black mt-4">R$ {saldoCelio.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
             <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
-            {extratoCelioMes.length === 0 ? <p className={`text-center text-xs font-bold py-8 ${textMuted}`}>Arraste para os lados para navegar.</p> : null}
+            {extratoCelioMes.length === 0 ? <p className={`text-center text-xs font-bold py-8 ${textMuted}`}>Nenhum gasto seu aqui.</p> : null}
             {extratoCelioMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <div>
@@ -379,7 +399,6 @@ function App() {
                <h1 className="text-4xl font-black mt-4">R$ {saldoBrenda.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
             
-            {/* MOTOR DO CICLO NA ABA DA BRENDA */}
             <div className={`p-6 rounded-[2rem] border ${bgCard}`}>
                <h3 className="font-black text-xl text-pink-500 italic uppercase mb-6 flex justify-between items-center">
                   <span>🌸 Saúde Íntima</span>
@@ -409,7 +428,7 @@ function App() {
             </div>
             
             <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
-            {extratoBrendaMes.length === 0 ? <p className={`text-center text-xs font-bold py-8 ${textMuted}`}>Arraste para os lados para navegar.</p> : null}
+            {extratoBrendaMes.length === 0 ? <p className={`text-center text-xs font-bold py-8 ${textMuted}`}>Nenhum gasto dela aqui.</p> : null}
             {extratoBrendaMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <div>
@@ -436,7 +455,7 @@ function App() {
               <h3 className="font-black text-sm uppercase italic mb-4">Novo Contrato Fixo</h3>
               <input type="text" placeholder="Ex: Aluguel Betim, Salário" value={formContrato.descricao} onChange={e => setFormContrato({...formContrato, descricao: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-bold text-sm ${inputClass}`} required />
               <div className="grid grid-cols-2 gap-3">
-                 <input type="number" placeholder="R$ 0,00" value={formContrato.valor} onChange={e => setFormContrato({...formContrato, valor: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-black text-lg ${inputClass}`} required />
+                 <input type="text" inputMode="decimal" placeholder="R$ 0,00" value={formContrato.valor} onChange={e => setFormContrato({...formContrato, valor: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-black text-lg ${inputClass}`} required />
                  <select value={formContrato.tipo} onChange={e => setFormContrato({...formContrato, tipo: e.target.value})} className={`w-full p-4 rounded-xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
                     <option value="despesa">💸 Pagar (Saída)</option>
                     <option value="entrada">💰 Receber (Entrada)</option>
@@ -480,7 +499,7 @@ function App() {
             </div>
             <button onClick={async () => {
               await supabase.from('configuracoes').upsert({id: 1, ...config});
-              alert("Marco Zero configurado!"); carregarDados();
+              mostrarAviso("Marco Zero salvo! 💾", "sucesso"); carregarDados();
             }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95">💾 Salvar Ponto Zero</button>
           </div>
         )}
