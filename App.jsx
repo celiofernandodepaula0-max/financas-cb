@@ -6,7 +6,7 @@ function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   
-  // O SEGREDO MÁXIMO DA VELOCIDADE: Tudo começa lendo a memória do celular (Síncrono)
+  // Memória do Celular (Performance)
   const [tema, setTema] = useState(() => localStorage.getItem('@financasCB:tema') || 'dark');
   const [fotoUrl, setFotoUrl] = useState(() => localStorage.getItem('@financasCB:foto') || null);
   
@@ -24,34 +24,31 @@ function App() {
     const salvo = localStorage.getItem('@financasCB:ciclo');
     return salvo ? JSON.parse(salvo) : { data_inicio: '', duracao: 28 };
   });
+
+  // NOVO: Navegação de Meses
+  const [dataFiltro, setDataFiltro] = useState(new Date()); 
   
   const [editingEntryId, setEditingEntryId] = useState(null);
-  const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável' });
+  
+  // NOVO: Campo 'data' adicionado ao formulário (padrão é hoje)
+  const dataHoje = new Date().toISOString().split('T')[0];
+  const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável', data: dataHoje });
+  
   const [salvandoFoto, setSalvandoFoto] = useState(false);
   const fileInputRef = useRef(null);
 
   const carregarDados = async () => {
-    // Busca dados frescos na internet de forma invisível
-    const { data: f } = await supabase.from('fluxo').select('*').order('created_at', { ascending: false });
+    const { data: f } = await supabase.from('fluxo').select('*').order('data_lancamento', { ascending: false }).order('created_at', { ascending: false });
     const { data: c } = await supabase.from('configuracoes').select('*').maybeSingle();
     const { data: cb } = await supabase.from('ciclo_brenda').select('*').maybeSingle();
     
-    // Atualiza a tela e o "Cofre" do celular ao mesmo tempo
-    if (f) {
-      setLancamentos(f);
-      localStorage.setItem('@financasCB:lancamentos', JSON.stringify(f));
-    }
+    if (f) { setLancamentos(f); localStorage.setItem('@financasCB:lancamentos', JSON.stringify(f)); }
     if (c) { 
-      setConfig(c); 
-      localStorage.setItem('@financasCB:config', JSON.stringify(c));
+      setConfig(c); localStorage.setItem('@financasCB:config', JSON.stringify(c));
       const temaBanco = c.tema || 'dark';
-      setTema(temaBanco); 
-      localStorage.setItem('@financasCB:tema', temaBanco);
+      setTema(temaBanco); localStorage.setItem('@financasCB:tema', temaBanco);
     }
-    if (cb) {
-      setCiclo(cb);
-      localStorage.setItem('@financasCB:ciclo', JSON.stringify(cb));
-    }
+    if (cb) { setCiclo(cb); localStorage.setItem('@financasCB:ciclo', JSON.stringify(cb)); }
     
     const { data: img } = supabase.storage.from('perfis').getPublicUrl('casal.png');
     if (img) {
@@ -61,7 +58,6 @@ function App() {
     }
   };
 
-  // Roda a verificação invisível toda vez que abre o app
   useEffect(() => { carregarDados(); }, []);
 
   const alternarTema = async () => {
@@ -75,15 +71,9 @@ function App() {
     const file = e.target.files[0];
     if (!file) return;
     setSalvandoFoto(true);
-    
-    const { error } = await supabase.storage.from('perfis').upload('casal.png', file, { upsert: true, cacheControl: '0' });
-    
+    await supabase.storage.from('perfis').upload('casal.png', file, { upsert: true, cacheControl: '0' });
     setSalvandoFoto(false);
-    if (error) {
-      alert("Erro ao salvar foto: " + error.message);
-    } else {
-      carregarDados();
-    }
+    carregarDados();
   };
 
   const salvarGasto = async (e) => {
@@ -94,7 +84,7 @@ function App() {
       descricao: form.descricao, valor: v, tipo: form.tipo, 
       usuario: form.usuario, forma_pagamento: form.forma, 
       escopo: form.escopo, previsibilidade: form.previsibilidade,
-      mes: new Intl.DateTimeFormat('pt-BR', {month: 'long'}).format(new Date()) 
+      data_lancamento: form.data // Salva a data exata escolhida
     };
 
     if (editingEntryId) {
@@ -102,7 +92,6 @@ function App() {
     } else {
       await supabase.from('fluxo').insert([dadosParaSalvar]);
     }
-
     fecharModal();
     carregarDados();
   };
@@ -112,7 +101,8 @@ function App() {
     setForm({
       descricao: entry.descricao, valor: String(entry.valor).replace('.', ','),
       tipo: entry.tipo, usuario: entry.usuario, forma: entry.forma_pagamento,
-      escopo: entry.escopo, previsibilidade: entry.previsibilidade
+      escopo: entry.escopo, previsibilidade: entry.previsibilidade,
+      data: entry.data_lancamento || entry.created_at.split('T')[0]
     });
     setShowModal(true);
   };
@@ -120,12 +110,12 @@ function App() {
   const fecharModal = () => {
     setShowModal(false);
     setEditingEntryId(null);
-    setForm({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável' });
+    setForm({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável', data: dataHoje });
   };
 
   const apagarLancamento = async () => {
     if (!editingEntryId) return;
-    if (confirm("Tem certeza que deseja APAGAR este lançamento para sempre?")) {
+    if (confirm("Apagar definitivamente este lançamento?")) {
       await supabase.from('fluxo').delete().eq('id', editingEntryId);
       fecharModal();
       carregarDados();
@@ -139,56 +129,76 @@ function App() {
     carregarDados();
   };
 
-  // FILTROS
-  const gastosCasal = lancamentos.filter(i => i.escopo === 'casal');
-  const entradasCasal = gastosCasal.filter(i => i.tipo === 'entrada');
-  const despesasCasal = gastosCasal.filter(i => i.tipo === 'despesa');
-  
-  const despesasFixas = despesasCasal.filter(i => i.previsibilidade === 'Fixa').reduce((acc, i) => acc + Number(i.valor), 0);
-  const despesasVariaveis = despesasCasal.filter(i => i.previsibilidade === 'Variável').reduce((acc, i) => acc + Number(i.valor), 0);
-  
-  const totalEntradasCasal = entradasCasal.reduce((acc, i) => acc + Number(i.valor), 0);
-  const saldoAtualCasal = Number(config.saldo_inicial) + totalEntradasCasal - (despesasFixas + despesasVariaveis);
+  const salvarConfiguracoes = async () => {
+    const numSaldo = Number(config.saldo_inicial) || 0; // Garante que vazio vire 0 e não dê erro
+    const dadosConfig = { id: 1, saldo_inicial: numSaldo, data_inicio: config.data_inicio };
+    await supabase.from('configuracoes').upsert(dadosConfig);
+    setConfig(dadosConfig);
+    alert("Configurações atualizadas!");
+    carregarDados();
+  };
 
-  const saldoCelio = lancamentos.filter(i => i.escopo === 'celio').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
-  const saldoBrenda = lancamentos.filter(i => i.escopo === 'brenda').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
+  // --- LÓGICA DE DATAS E ACUMULAÇÃO (O CÉREBRO DO APP) ---
+  const mesAnoFiltro = dataFiltro.toISOString().slice(0, 7); // Ex: "2026-02"
+  
+  // Navegação
+  const irMesAnterior = () => setDataFiltro(new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() - 1, 1));
+  const irMesProximo = () => setDataFiltro(new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 1));
+  
+  const nomeMeses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+  const nomeMesAtual = `${nomeMeses[dataFiltro.getMonth()]} ${dataFiltro.getFullYear()}`;
 
-  // MOTOR DO CICLO
+  // Filtra lançamentos para exibir APENAS os do mês selecionado
+  const lancamentosDoMes = lancamentos.filter(i => {
+    const dataRef = i.data_lancamento || i.created_at.split('T')[0];
+    return dataRef.startsWith(mesAnoFiltro);
+  });
+
+  // Filtra lançamentos para calcular o ACUMULADO (Tudo até o final do mês selecionado)
+  const ultimoDiaDoMes = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0).toISOString().split('T')[0];
+  const lancamentosAcumulados = lancamentos.filter(i => {
+    const dataRef = i.data_lancamento || i.created_at.split('T')[0];
+    return dataRef <= ultimoDiaDoMes;
+  });
+
+  // Cálculos do Mês Visualizado (Extrato)
+  const gastosCasalMes = lancamentosDoMes.filter(i => i.escopo === 'casal');
+  const despesasFixasMes = gastosCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Fixa').reduce((acc, i) => acc + Number(i.valor), 0);
+  const despesasVariaveisMes = gastosCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Variável').reduce((acc, i) => acc + Number(i.valor), 0);
+  
+  // Cálculos do Acumulado (Efeito Cascata)
+  const acmCasal = lancamentosAcumulados.filter(i => i.escopo === 'casal');
+  const totalEntradasAcumulado = acmCasal.filter(i => i.tipo === 'entrada').reduce((acc, i) => acc + Number(i.valor), 0);
+  const totalSaidasAcumulado = acmCasal.filter(i => i.tipo === 'despesa').reduce((acc, i) => acc + Number(i.valor), 0);
+  
+  // Saldo Final = Ponto Zero + Entradas Históricas - Saídas Históricas
+  const saldoAtualCasal = Number(config.saldo_inicial || 0) + totalEntradasAcumulado - totalSaidasAcumulado;
+
+  // Saldos Pessoais (Também Acumulativos)
+  const saldoCelio = lancamentosAcumulados.filter(i => i.escopo === 'celio').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
+  const saldoBrenda = lancamentosAcumulados.filter(i => i.escopo === 'brenda').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
+
+  // Motor do Ciclo
   let infoCiclo = { fase: "Aguardando dados...", cor: "text-gray-400", diasProxima: 0, ovulacaoData: '' };
-  
   if (ciclo.data_inicio) {
-    const hoje = new Date();
-    hoje.setHours(0,0,0,0);
+    const hoje = new Date(); hoje.setHours(0,0,0,0);
     const inicio = new Date(ciclo.data_inicio + 'T00:00:00'); 
-    const proximaMenstruacao = new Date(inicio);
-    proximaMenstruacao.setDate(inicio.getDate() + Number(ciclo.duracao));
-    const ovulacao = new Date(proximaMenstruacao);
-    ovulacao.setDate(proximaMenstruacao.getDate() - 14);
-    const inicioFertil = new Date(ovulacao);
-    inicioFertil.setDate(ovulacao.getDate() - 5);
-    const fimFertil = new Date(ovulacao);
-    fimFertil.setDate(ovulacao.getDate() + 1);
+    const proximaMenstruacao = new Date(inicio); proximaMenstruacao.setDate(inicio.getDate() + Number(ciclo.duracao));
+    const ovulacao = new Date(proximaMenstruacao); ovulacao.setDate(proximaMenstruacao.getDate() - 14);
+    const inicioFertil = new Date(ovulacao); inicioFertil.setDate(ovulacao.getDate() - 5);
+    const fimFertil = new Date(ovulacao); fimFertil.setDate(ovulacao.getDate() + 1);
 
     const diaDoCicloAtual = Math.floor((hoje - inicio) / (1000 * 60 * 60 * 24)) + 1;
     infoCiclo.diasProxima = Math.ceil((proximaMenstruacao - hoje) / (1000 * 60 * 60 * 24));
     infoCiclo.ovulacaoData = ovulacao.toLocaleDateString('pt-BR');
 
-    if (diaDoCicloAtual >= 1 && diaDoCicloAtual <= 5) { 
-      infoCiclo.fase = "🩸 Menstruação (Sangramento Ativo)"; infoCiclo.cor = "text-red-500"; 
-    } else if (hoje >= inicioFertil && hoje <= fimFertil) {
-      if (hoje.getTime() === ovulacao.getTime()) {
-        infoCiclo.fase = "🥚 Dia de Ovulação (Alta Fertilidade!)"; infoCiclo.cor = "text-purple-500";
-      } else {
-        infoCiclo.fase = "✨ Período Fértil"; infoCiclo.cor = "text-purple-400";
-      }
-    } else if (hoje > fimFertil && hoje < proximaMenstruacao) {
-      infoCiclo.fase = "🌥️ Fase Lútea (TPM)"; infoCiclo.cor = "text-blue-400";
-    } else if (diaDoCicloAtual > 5 && hoje < inicioFertil) {
-      infoCiclo.fase = "🌱 Fase Folicular"; infoCiclo.cor = "text-pink-400";
-    } else {
-      infoCiclo.fase = "🔄 Ciclo Atrasado"; infoCiclo.cor = "text-orange-500";
-      infoCiclo.diasProxima = 0;
-    }
+    if (diaDoCicloAtual >= 1 && diaDoCicloAtual <= 5) { infoCiclo.fase = "🩸 Menstruação (Sangramento Ativo)"; infoCiclo.cor = "text-red-500"; }
+    else if (hoje >= inicioFertil && hoje <= fimFertil) {
+      if (hoje.getTime() === ovulacao.getTime()) { infoCiclo.fase = "🥚 Dia de Ovulação"; infoCiclo.cor = "text-purple-500"; }
+      else { infoCiclo.fase = "✨ Período Fértil"; infoCiclo.cor = "text-purple-400"; }
+    } else if (hoje > fimFertil && hoje < proximaMenstruacao) { infoCiclo.fase = "🌥️ Fase Lútea (TPM)"; infoCiclo.cor = "text-blue-400"; }
+    else if (diaDoCicloAtual > 5 && hoje < inicioFertil) { infoCiclo.fase = "🌱 Fase Folicular"; infoCiclo.cor = "text-pink-400"; }
+    else { infoCiclo.fase = "🔄 Ciclo Atrasado"; infoCiclo.cor = "text-orange-500"; infoCiclo.diasProxima = 0; }
   }
 
   const isDark = tema === 'dark';
@@ -202,6 +212,7 @@ function App() {
   return (
     <div className={`min-h-screen ${bgBody} ${textBody} font-sans overflow-x-hidden transition-colors duration-300`}>
       
+      {/* MENU LATERAL */}
       <div className={`fixed inset-y-0 left-0 w-72 ${bgMenu} z-50 transform ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-500 p-8`}>
         <div className="flex justify-between items-center mb-10">
           <h2 className="font-black italic text-xl">MENU</h2>
@@ -232,17 +243,24 @@ function App() {
       </header>
 
       <main className="max-w-md mx-auto px-6 pb-32">
+        {/* NAVEGAÇÃO DE MESES GLOBAL */}
+        {aba !== 'CONFIG' && (
+          <div className="flex justify-between items-center mb-6 px-4">
+             <button onClick={irMesAnterior} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❮</button>
+             <span className="font-black text-sm uppercase tracking-widest">{nomeMesAtual}</span>
+             <button onClick={irMesProximo} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❯</button>
+          </div>
+        )}
+
         {aba === 'DASHBOARD' && (
           <div className="animate-in fade-in duration-500">
             <div className="bg-gradient-to-br from-purple-800 via-indigo-900 to-black p-8 rounded-[3rem] shadow-2xl mb-8 text-white relative overflow-hidden">
-              <p className="text-[10px] font-black opacity-60 uppercase mb-1">Caixa Geral do Casal</p>
-              <h1 className="text-5xl font-black tracking-tighter">R$ {saldoAtualCasal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
-              <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-white/20 text-[9px] font-black uppercase tracking-widest">
+              <p className="text-[10px] font-black opacity-60 uppercase mb-1">Acumulado até {nomeMesAtual}</p>
+              <h1 className={`text-5xl font-black tracking-tighter ${saldoAtualCasal < 0 ? 'text-red-400' : 'text-white'}`}>
+                R$ {saldoAtualCasal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
+              </h1>
+              <div className="flex justify-between mt-6 pt-4 border-t border-white/20 text-[9px] font-black uppercase tracking-widest">
                  <div>
-                    <span className="opacity-50 block mb-1">Início da Contagem</span>
-                    <span className="text-green-400">{config.data_inicio ? new Date(config.data_inicio).toLocaleDateString('pt-BR') : 'Não definido'}</span>
-                 </div>
-                 <div className="text-right">
                     <span className="opacity-50 block mb-1">Ponto Zero</span>
                     <span className="text-white">R$ {Number(config.saldo_inicial).toFixed(2)}</span>
                  </div>
@@ -251,24 +269,26 @@ function App() {
 
             <div className="grid grid-cols-2 gap-4 mb-8">
                <div className={`p-5 rounded-[2rem] border ${bgCard}`}>
-                  <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Despesas Fixas</p>
-                  <p className="text-lg font-black text-red-500">R$ {despesasFixas.toFixed(2)}</p>
+                  <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Fixas ({nomeMesAtual})</p>
+                  <p className="text-lg font-black text-red-500">R$ {despesasFixasMes.toFixed(2)}</p>
                </div>
                <div className={`p-5 rounded-[2rem] border ${bgCard}`}>
-                  <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Despesas Variáveis</p>
-                  <p className="text-lg font-black text-orange-400">R$ {despesasVariaveis.toFixed(2)}</p>
+                  <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Variáveis ({nomeMesAtual})</p>
+                  <p className="text-lg font-black text-orange-400">R$ {despesasVariaveisMes.toFixed(2)}</p>
                </div>
             </div>
 
-            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Lançamentos (Toque para Editar)</h3>
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato do Mês</h3>
             <div className="space-y-3">
-              {gastosCasal.slice(0, 15).map(i => (
+              {gastosCasalMes.length === 0 ? (
+                 <p className={`text-center text-xs font-bold py-8 ${textMuted}`}>Nenhum lançamento neste mês.</p>
+              ) : gastosCasalMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer transition-all hover:border-purple-500/20 active:scale-[0.98] ${bgCard}`}>
                   <div className="flex items-center gap-4">
-                    <div className={`w-2 h-2 rounded-full ${i.tipo === 'entrada' ? 'bg-green-500 shadow-[0_0_8px_rgba(74,222,128,0.5)]' : (i.previsibilidade === 'Fixa' ? 'bg-red-600' : 'bg-orange-400')}`}></div>
+                    <div className={`w-2 h-2 rounded-full ${i.tipo === 'entrada' ? 'bg-green-500' : (i.previsibilidade === 'Fixa' ? 'bg-red-600' : 'bg-orange-400')}`}></div>
                     <div>
                       <p className="font-bold text-sm leading-none mb-1">{i.descricao}</p>
-                      <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.usuario} • {i.previsibilidade} • {i.forma_pagamento}</p>
+                      <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.usuario} • {i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
                     </div>
                   </div>
                   <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>
@@ -283,12 +303,17 @@ function App() {
         {aba === 'CELIO' && (
           <div className="animate-in fade-in duration-500 space-y-6">
             <div className="bg-blue-600 text-white p-8 rounded-[3rem] shadow-xl text-center">
-               <h2 className="font-black text-2xl uppercase italic">Gasto Pessoal Célio</h2>
+               <p className="text-[10px] font-black opacity-60 uppercase mb-1">Acumulado Geral</p>
+               <h2 className="font-black text-2xl uppercase italic">Caixa Pessoal Célio</h2>
                <h1 className="text-4xl font-black mt-4">R$ {saldoCelio.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
-            {lancamentos.filter(i => i.escopo === 'celio').map(i => (
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
+            {lancamentosDoMes.filter(i => i.escopo === 'celio').map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
-                  <p className="font-bold text-sm">{i.descricao}</p>
+                  <div>
+                     <p className="font-bold text-sm">{i.descricao}</p>
+                     <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
+                  </div>
                   <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
                 </div>
             ))}
@@ -298,6 +323,7 @@ function App() {
         {aba === 'BRENDA' && (
           <div className="animate-in fade-in duration-500 space-y-8">
             <div className="bg-pink-600 text-white p-8 rounded-[3rem] shadow-xl text-center">
+               <p className="text-[10px] font-black opacity-60 uppercase mb-1">Acumulado Geral</p>
                <h2 className="font-black text-2xl uppercase italic">Caixa Pessoal Brenda</h2>
                <h1 className="text-4xl font-black mt-4">R$ {saldoBrenda.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
@@ -306,7 +332,7 @@ function App() {
                <h3 className="font-black text-xl text-pink-500 italic uppercase mb-6 flex justify-between items-center">
                   <span>🌸 Saúde Íntima</span>
                   <span className="text-[10px] bg-pink-500/20 px-3 py-1 rounded-full font-black">
-                    {infoCiclo.diasProxima > 0 ? `${infoCiclo.diasProxima} DIAS PARA A PRÓXIMA` : 'ATRASADO'}
+                    {infoCiclo.diasProxima > 0 ? `${infoCiclo.diasProxima} DIAS P/ PRÓXIMA` : 'ATRASADO'}
                   </span>
                </h3>
                <div className="mb-6 text-center bg-black/5 p-5 rounded-3xl border border-white/5">
@@ -330,9 +356,13 @@ function App() {
                </form>
             </div>
             
-            {lancamentos.filter(i => i.escopo === 'brenda').map(i => (
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
+            {lancamentosDoMes.filter(i => i.escopo === 'brenda').map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
-                  <p className="font-bold text-sm">{i.descricao}</p>
+                  <div>
+                     <p className="font-bold text-sm">{i.descricao}</p>
+                     <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
+                  </div>
                   <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
                 </div>
             ))}
@@ -348,12 +378,9 @@ function App() {
             </div>
             <div>
               <label className={`text-[9px] font-black uppercase block mb-2 ${textMuted}`}>Saldo no Banco (Ponto Zero)</label>
-              <input type="number" value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xl ${inputClass}`} />
+              <input type="number" value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} placeholder="Pode deixar em branco ou 0" className={`w-full p-4 rounded-2xl border outline-none font-bold text-xl ${inputClass}`} />
             </div>
-            <button onClick={async () => {
-              await supabase.from('configuracoes').upsert({id: 1, ...config});
-              alert("Marco Zero configurado!");
-            }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95">💾 Salvar Ponto Zero</button>
+            <button onClick={salvarConfiguracoes} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95">💾 Salvar Ponto Zero</button>
           </div>
         )}
       </main>
@@ -373,6 +400,7 @@ function App() {
             </div>
             
             <form onSubmit={salvarGasto} className="space-y-4">
+              
               <div>
                 <select value={form.escopo} onChange={e => setForm({...form, escopo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[11px] font-black uppercase ${inputClass}`}>
                    <option value="casal">🌍 Conta Central do Casal</option>
@@ -408,6 +436,12 @@ function App() {
                     <option value="Variável">🍔 Variável</option>
                     <option value="Fixa">🏠 Fixa</option>
                  </select>
+              </div>
+
+              {/* NOVO: Campo de Data no Lançamento */}
+              <div>
+                 <label className={`text-[9px] font-black uppercase block mb-1 mt-2 ${textMuted}`}>Data do Ocorrido</label>
+                 <input type="date" value={form.data} onChange={e => setForm({...form, data: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} required />
               </div>
               
               <div className="flex gap-3 mt-6 pt-6 border-t border-gray-500/10">
