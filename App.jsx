@@ -36,6 +36,33 @@ function App() {
   const [salvandoFoto, setSalvandoFoto] = useState(false);
   const fileInputRef = useRef(null);
 
+  // --- SENSOR DE SWIPE (DESLIZAR TELA) ---
+  const [touchStart, setTouchStart] = useState(null);
+  const [touchEnd, setTouchEnd] = useState(null);
+  const minSwipeDistance = 50;
+
+  const onTouchStart = (e) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const onTouchMove = (e) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > minSwipeDistance;
+    const isRightSwipe = distance < -minSwipeDistance;
+
+    if (aba !== 'CONFIG' && aba !== 'CONTRATOS') {
+      if (isLeftSwipe) irMesProximo();
+      if (isRightSwipe) irMesAnterior();
+    }
+  };
+  // ----------------------------------------
+
   const carregarDados = async () => {
     const { data: f } = await supabase.from('fluxo').select('*').order('data_lancamento', { ascending: false });
     const { data: ct } = await supabase.from('contratos_fixos').select('*');
@@ -144,6 +171,9 @@ function App() {
   const nomeMeses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
   const nomeMesAtual = `${nomeMeses[dataFiltro.getMonth()]} ${dataFiltro.getFullYear()}`;
 
+  const irMesAnterior = () => setDataFiltro(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  const irMesProximo = () => setDataFiltro(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+
   const calcularMesesAtivos = (dataInicioStr) => {
     if (!dataInicioStr) return 0;
     const inicio = new Date(dataInicioStr + 'T00:00:00');
@@ -195,7 +225,7 @@ function App() {
   const despesasFixasMes = extratoCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Fixa').reduce((acc, i) => acc + Number(i.valor), 0);
   const despesasVariaveisMes = extratoCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Variável').reduce((acc, i) => acc + Number(i.valor), 0);
 
-  // MOTOR DO CICLO (COM LÓGICA DO DRAUZIO VARELLA)
+  // MOTOR DO CICLO (DRAUZIO VARELLA)
   let infoCiclo = { fase: "Aguardando dados...", cor: "text-gray-400", diasProxima: 0, ovulacaoData: '' };
   if (ciclo.data_inicio) {
     const hoje = new Date(); hoje.setHours(0,0,0,0);
@@ -253,19 +283,24 @@ function App() {
            <span className={`block text-[10px] font-black uppercase ${textMuted}`}>Olá, Casal</span>
            <span className="text-xs font-bold text-purple-500 italic">Célio & Brenda</span>
         </div>
-        
         <div onClick={() => !salvandoFoto && fileInputRef.current.click()} className={`w-12 h-12 rounded-full border-2 border-purple-600 overflow-hidden cursor-pointer shadow-lg relative flex items-center justify-center ${salvandoFoto ? 'animate-pulse bg-purple-900' : ''}`}>
            {salvandoFoto ? <span className="text-[8px] font-black">⚙️</span> : <img src={fotoUrl || 'https://via.placeholder.com/150'} className="w-full h-full object-cover bg-slate-800" />}
            <input type="file" accept="image/*" ref={fileInputRef} onChange={subirFoto} className="hidden" />
         </div>
       </header>
 
-      <main className="max-w-md mx-auto px-6 pb-32">
+      {/* ÁREA PRINCIPAL COM SENSOR DE SWIPE */}
+      <main 
+        onTouchStart={onTouchStart} 
+        onTouchMove={onTouchMove} 
+        onTouchEnd={onTouchEnd} 
+        className="max-w-md mx-auto px-6 pb-32"
+      >
         {aba !== 'CONFIG' && aba !== 'CONTRATOS' && (
           <div className="flex justify-between items-center mb-6 px-4">
-             <button onClick={() => setDataFiltro(new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() - 1, 1))} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❮</button>
+             <button onClick={irMesAnterior} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❮</button>
              <span className="font-black text-sm uppercase tracking-widest">{nomeMesAtual}</span>
-             <button onClick={() => setDataFiltro(new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 1))} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❯</button>
+             <button onClick={irMesProximo} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❯</button>
           </div>
         )}
 
@@ -291,6 +326,7 @@ function App() {
 
             <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato do Mês</h3>
             <div className="space-y-3">
+              {extratoCasalMes.length === 0 ? <p className={`text-center text-xs font-bold py-8 ${textMuted}`}>Arraste para os lados ou lance no "+".</p> : null}
               {extratoCasalMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer transition-all hover:border-purple-500/20 active:scale-[0.98] ${bgCard}`}>
                   <div className="flex items-center gap-4">
@@ -319,6 +355,7 @@ function App() {
                <h1 className="text-4xl font-black mt-4">R$ {saldoCelio.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
             <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
+            {extratoCelioMes.length === 0 ? <p className={`text-center text-xs font-bold py-8 ${textMuted}`}>Arraste para os lados para navegar.</p> : null}
             {extratoCelioMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <div>
@@ -342,7 +379,7 @@ function App() {
                <h1 className="text-4xl font-black mt-4">R$ {saldoBrenda.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
             
-            {/* O MOTOR DO CICLO RESTAURADO */}
+            {/* MOTOR DO CICLO NA ABA DA BRENDA */}
             <div className={`p-6 rounded-[2rem] border ${bgCard}`}>
                <h3 className="font-black text-xl text-pink-500 italic uppercase mb-6 flex justify-between items-center">
                   <span>🌸 Saúde Íntima</span>
@@ -372,6 +409,7 @@ function App() {
             </div>
             
             <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
+            {extratoBrendaMes.length === 0 ? <p className={`text-center text-xs font-bold py-8 ${textMuted}`}>Arraste para os lados para navegar.</p> : null}
             {extratoBrendaMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <div>
@@ -387,7 +425,6 @@ function App() {
           </div>
         )}
 
-        {/* CONTRATOS FIXOS */}
         {aba === 'CONTRATOS' && (
           <div className="animate-in fade-in duration-500 space-y-6">
             <div className="bg-yellow-600 text-white p-8 rounded-[3rem] shadow-xl mb-8">
@@ -397,7 +434,7 @@ function App() {
 
             <form onSubmit={salvarContratoFixo} className={`p-6 rounded-[2rem] border ${bgCard} space-y-4`}>
               <h3 className="font-black text-sm uppercase italic mb-4">Novo Contrato Fixo</h3>
-              <input type="text" placeholder="Ex: Aluguel Betim, Salário Célio" value={formContrato.descricao} onChange={e => setFormContrato({...formContrato, descricao: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-bold text-sm ${inputClass}`} required />
+              <input type="text" placeholder="Ex: Aluguel Betim, Salário" value={formContrato.descricao} onChange={e => setFormContrato({...formContrato, descricao: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-bold text-sm ${inputClass}`} required />
               <div className="grid grid-cols-2 gap-3">
                  <input type="number" placeholder="R$ 0,00" value={formContrato.valor} onChange={e => setFormContrato({...formContrato, valor: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-black text-lg ${inputClass}`} required />
                  <select value={formContrato.tipo} onChange={e => setFormContrato({...formContrato, tipo: e.target.value})} className={`w-full p-4 rounded-xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
@@ -449,7 +486,6 @@ function App() {
         )}
       </main>
 
-      {/* BOTÃO FLUTUANTE DE GASTO AVULSO */}
       {aba !== 'CONTRATOS' && (
         <button onClick={() => setShowModal(true)} className="fixed bottom-8 left-1/2 -translate-x-1/2 w-16 h-16 bg-gradient-to-tr from-purple-700 to-purple-500 text-white rounded-full shadow-[0_10px_40px_rgba(147,51,234,0.6)] flex items-center justify-center text-3xl font-bold z-40 active:scale-90 transition-transform">
           +
