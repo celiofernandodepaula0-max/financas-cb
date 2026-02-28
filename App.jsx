@@ -6,43 +6,46 @@ function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   
-  // Memória do Celular (Performance)
   const [tema, setTema] = useState(() => localStorage.getItem('@financasCB:tema') || 'dark');
   const [fotoUrl, setFotoUrl] = useState(() => localStorage.getItem('@financasCB:foto') || null);
   
   const [lancamentos, setLancamentos] = useState(() => {
-    const salvo = localStorage.getItem('@financasCB:lancamentos');
-    return salvo ? JSON.parse(salvo) : [];
+    const salvo = localStorage.getItem('@financasCB:lancamentos'); return salvo ? JSON.parse(salvo) : [];
+  });
+  
+  // NOVO: Estado para guardar os Contratos Fixos
+  const [contratos, setContratos] = useState(() => {
+    const salvo = localStorage.getItem('@financasCB:contratos'); return salvo ? JSON.parse(salvo) : [];
   });
   
   const [config, setConfig] = useState(() => {
-    const salvo = localStorage.getItem('@financasCB:config');
-    return salvo ? JSON.parse(salvo) : { saldo_inicial: 0, data_inicio: '' };
+    const salvo = localStorage.getItem('@financasCB:config'); return salvo ? JSON.parse(salvo) : { saldo_inicial: 0, data_inicio: '' };
   });
   
   const [ciclo, setCiclo] = useState(() => {
-    const salvo = localStorage.getItem('@financasCB:ciclo');
-    return salvo ? JSON.parse(salvo) : { data_inicio: '', duracao: 28 };
+    const salvo = localStorage.getItem('@financasCB:ciclo'); return salvo ? JSON.parse(salvo) : { data_inicio: '', duracao: 28 };
   });
 
-  // NOVO: Navegação de Meses
   const [dataFiltro, setDataFiltro] = useState(new Date()); 
-  
   const [editingEntryId, setEditingEntryId] = useState(null);
   
-  // NOVO: Campo 'data' adicionado ao formulário (padrão é hoje)
   const dataHoje = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável', data: dataHoje });
   
+  // Formulário separado para criar Contas Fixas
+  const [formContrato, setFormContrato] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', escopo: 'casal', data_inicio: dataHoje });
+
   const [salvandoFoto, setSalvandoFoto] = useState(false);
   const fileInputRef = useRef(null);
 
   const carregarDados = async () => {
-    const { data: f } = await supabase.from('fluxo').select('*').order('data_lancamento', { ascending: false }).order('created_at', { ascending: false });
+    const { data: f } = await supabase.from('fluxo').select('*').order('data_lancamento', { ascending: false });
+    const { data: ct } = await supabase.from('contratos_fixos').select('*');
     const { data: c } = await supabase.from('configuracoes').select('*').maybeSingle();
     const { data: cb } = await supabase.from('ciclo_brenda').select('*').maybeSingle();
     
     if (f) { setLancamentos(f); localStorage.setItem('@financasCB:lancamentos', JSON.stringify(f)); }
+    if (ct) { setContratos(ct); localStorage.setItem('@financasCB:contratos', JSON.stringify(ct)); }
     if (c) { 
       setConfig(c); localStorage.setItem('@financasCB:config', JSON.stringify(c));
       const temaBanco = c.tema || 'dark';
@@ -53,8 +56,7 @@ function App() {
     const { data: img } = supabase.storage.from('perfis').getPublicUrl('casal.png');
     if (img) {
       const urlComCache = `${img.publicUrl}?t=${new Date().getTime()}`;
-      setFotoUrl(urlComCache);
-      localStorage.setItem('@financasCB:foto', urlComCache);
+      setFotoUrl(urlComCache); localStorage.setItem('@financasCB:foto', urlComCache);
     }
   };
 
@@ -62,8 +64,7 @@ function App() {
 
   const alternarTema = async () => {
     const novoTema = tema === 'dark' ? 'light' : 'dark';
-    setTema(novoTema);
-    localStorage.setItem('@financasCB:tema', novoTema);
+    setTema(novoTema); localStorage.setItem('@financasCB:tema', novoTema);
     await supabase.from('configuracoes').upsert({ id: 1, tema: novoTema });
   };
 
@@ -79,37 +80,48 @@ function App() {
   const salvarGasto = async (e) => {
     e.preventDefault();
     const v = parseFloat(String(form.valor).replace(',', '.'));
-    
     const dadosParaSalvar = { 
       descricao: form.descricao, valor: v, tipo: form.tipo, 
       usuario: form.usuario, forma_pagamento: form.forma, 
-      escopo: form.escopo, previsibilidade: form.previsibilidade,
-      data_lancamento: form.data // Salva a data exata escolhida
+      escopo: form.escopo, previsibilidade: form.previsibilidade, data_lancamento: form.data 
     };
 
-    if (editingEntryId) {
-      await supabase.from('fluxo').update(dadosParaSalvar).eq('id', editingEntryId);
-    } else {
-      await supabase.from('fluxo').insert([dadosParaSalvar]);
-    }
-    fecharModal();
+    if (editingEntryId) await supabase.from('fluxo').update(dadosParaSalvar).eq('id', editingEntryId);
+    else await supabase.from('fluxo').insert([dadosParaSalvar]);
+    
+    fecharModal(); carregarDados();
+  };
+
+  const salvarContratoFixo = async (e) => {
+    e.preventDefault();
+    const v = parseFloat(String(formContrato.valor).replace(',', '.'));
+    const dados = { ...formContrato, valor: v };
+    await supabase.from('contratos_fixos').insert([dados]);
+    setFormContrato({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', escopo: 'casal', data_inicio: dataHoje });
+    alert("Conta Fixa ativada com sucesso!");
     carregarDados();
   };
 
+  const apagarContratoFixo = async (id) => {
+    if (confirm("Apagar esta conta fixa? Ela deixará de descontar nos meses passados e futuros.")) {
+      await supabase.from('contratos_fixos').delete().eq('id', id);
+      carregarDados();
+    }
+  };
+
   const iniciarEdicao = (entry) => {
+    if (entry.isVirtual) return alert("Ispe é uma Conta Fixa. Para editá-la, vá no menu 'Contas Fixas'.");
     setEditingEntryId(entry.id);
     setForm({
       descricao: entry.descricao, valor: String(entry.valor).replace('.', ','),
       tipo: entry.tipo, usuario: entry.usuario, forma: entry.forma_pagamento,
-      escopo: entry.escopo, previsibilidade: entry.previsibilidade,
-      data: entry.data_lancamento || entry.created_at.split('T')[0]
+      escopo: entry.escopo, previsibilidade: entry.previsibilidade, data: entry.data_lancamento
     });
     setShowModal(true);
   };
 
   const fecharModal = () => {
-    setShowModal(false);
-    setEditingEntryId(null);
+    setShowModal(false); setEditingEntryId(null);
     setForm({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável', data: dataHoje });
   };
 
@@ -117,66 +129,78 @@ function App() {
     if (!editingEntryId) return;
     if (confirm("Apagar definitivamente este lançamento?")) {
       await supabase.from('fluxo').delete().eq('id', editingEntryId);
-      fecharModal();
-      carregarDados();
+      fecharModal(); carregarDados();
     }
   };
 
   const salvarCiclo = async (e) => {
-    e.preventDefault();
-    await supabase.from('ciclo_brenda').upsert({ id: 1, ...ciclo });
-    alert("Dados do ciclo sincronizados!");
-    carregarDados();
+    e.preventDefault(); await supabase.from('ciclo_brenda').upsert({ id: 1, ...ciclo });
+    alert("Ciclo salvo!"); carregarDados();
   };
 
-  const salvarConfiguracoes = async () => {
-    const numSaldo = Number(config.saldo_inicial) || 0; // Garante que vazio vire 0 e não dê erro
-    const dadosConfig = { id: 1, saldo_inicial: numSaldo, data_inicio: config.data_inicio };
-    await supabase.from('configuracoes').upsert(dadosConfig);
-    setConfig(dadosConfig);
-    alert("Configurações atualizadas!");
-    carregarDados();
-  };
-
-  // --- LÓGICA DE DATAS E ACUMULAÇÃO (O CÉREBRO DO APP) ---
-  const mesAnoFiltro = dataFiltro.toISOString().slice(0, 7); // Ex: "2026-02"
-  
-  // Navegação
-  const irMesAnterior = () => setDataFiltro(new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() - 1, 1));
-  const irMesProximo = () => setDataFiltro(new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 1));
-  
+  // --- MOTOR MATEMÁTICO DO TEMPO E RECORRÊNCIA ---
+  const mesAnoFiltro = dataFiltro.toISOString().slice(0, 7); 
+  const ultimoDiaDoMesVisualizado = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0).toISOString().split('T')[0];
   const nomeMeses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
   const nomeMesAtual = `${nomeMeses[dataFiltro.getMonth()]} ${dataFiltro.getFullYear()}`;
 
-  // Filtra lançamentos para exibir APENAS os do mês selecionado
-  const lancamentosDoMes = lancamentos.filter(i => {
-    const dataRef = i.data_lancamento || i.created_at.split('T')[0];
-    return dataRef.startsWith(mesAnoFiltro);
-  });
+  // Função central: Quantos meses essa conta fixa está ativa até o mês visualizado?
+  const calcularMesesAtivos = (dataInicioStr) => {
+    if (!dataInicioStr) return 0;
+    const inicio = new Date(dataInicioStr + 'T00:00:00');
+    const filtro = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0); 
+    if (inicio > filtro) return 0; // Ainda não começou
+    const anos = filtro.getFullYear() - inicio.getFullYear();
+    const meses = filtro.getMonth() - inicio.getMonth();
+    return (anos * 12) + meses + 1;
+  };
 
-  // Filtra lançamentos para calcular o ACUMULADO (Tudo até o final do mês selecionado)
-  const ultimoDiaDoMes = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0).toISOString().split('T')[0];
-  const lancamentosAcumulados = lancamentos.filter(i => {
-    const dataRef = i.data_lancamento || i.created_at.split('T')[0];
-    return dataRef <= ultimoDiaDoMes;
-  });
+  // 1. Lançamentos Manuais
+  const lancamentosDoMes = lancamentos.filter(i => (i.data_lancamento || '').startsWith(mesAnoFiltro));
+  const lancamentosAcumulados = lancamentos.filter(i => (i.data_lancamento || '') <= ultimoDiaDoMesVisualizado);
 
-  // Cálculos do Mês Visualizado (Extrato)
-  const gastosCasalMes = lancamentosDoMes.filter(i => i.escopo === 'casal');
-  const despesasFixasMes = gastosCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Fixa').reduce((acc, i) => acc + Number(i.valor), 0);
-  const despesasVariaveisMes = gastosCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Variável').reduce((acc, i) => acc + Number(i.valor), 0);
-  
-  // Cálculos do Acumulado (Efeito Cascata)
-  const acmCasal = lancamentosAcumulados.filter(i => i.escopo === 'casal');
-  const totalEntradasAcumulado = acmCasal.filter(i => i.tipo === 'entrada').reduce((acc, i) => acc + Number(i.valor), 0);
-  const totalSaidasAcumulado = acmCasal.filter(i => i.tipo === 'despesa').reduce((acc, i) => acc + Number(i.valor), 0);
-  
-  // Saldo Final = Ponto Zero + Entradas Históricas - Saídas Históricas
-  const saldoAtualCasal = Number(config.saldo_inicial || 0) + totalEntradasAcumulado - totalSaidasAcumulado;
+  // 2. Geração de "Lançamentos Virtuais" (As contas fixas que aparecem no extrato)
+  const contratosVirtuais = contratos.filter(c => calcularMesesAtivos(c.data_inicio) > 0).map(c => ({
+     ...c,
+     id: 'virtual-' + c.id,
+     isVirtual: true, // Tag para sabermos que não pode editar aqui
+     data_lancamento: `${mesAnoFiltro}-01`,
+     forma_pagamento: 'Débito Recorrente',
+     previsibilidade: 'Fixa'
+  }));
 
-  // Saldos Pessoais (Também Acumulativos)
-  const saldoCelio = lancamentosAcumulados.filter(i => i.escopo === 'celio').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
-  const saldoBrenda = lancamentosAcumulados.filter(i => i.escopo === 'brenda').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
+  // Mistura os avulsos com os virtuais para criar o Extrato Perfeito
+  const extratoCasalMes = [...lancamentosDoMes.filter(i => i.escopo === 'casal'), ...contratosVirtuais.filter(i => i.escopo === 'casal')]
+     .sort((a,b) => new Date(b.data_lancamento) - new Date(a.data_lancamento));
+     
+  const extratoCelioMes = [...lancamentosDoMes.filter(i => i.escopo === 'celio'), ...contratosVirtuais.filter(i => i.escopo === 'celio')]
+     .sort((a,b) => new Date(b.data_lancamento) - new Date(a.data_lancamento));
+
+  const extratoBrendaMes = [...lancamentosDoMes.filter(i => i.escopo === 'brenda'), ...contratosVirtuais.filter(i => i.escopo === 'brenda')]
+     .sort((a,b) => new Date(b.data_lancamento) - new Date(a.data_lancamento));
+
+  // 3. O Cálculo do Acumulado (Efeito Cascata com Contratos)
+  const calcularSaldoAcumulado = (escopo) => {
+     const avulsos = lancamentosAcumulados.filter(i => i.escopo === escopo);
+     let saldo = avulsos.reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
+     
+     // Adiciona o peso de cada contrato multiplicando pelos meses ativos
+     contratos.filter(c => c.escopo === escopo).forEach(c => {
+        const meses = calcularMesesAtivos(c.data_inicio);
+        if (meses > 0) {
+           saldo += c.tipo === 'entrada' ? (Number(c.valor) * meses) : -(Number(c.valor) * meses);
+        }
+     });
+     return saldo;
+  };
+
+  const saldoAtualCasal = Number(config.saldo_inicial || 0) + calcularSaldoAcumulado('casal');
+  const saldoCelio = calcularSaldoAcumulado('celio');
+  const saldoBrenda = calcularSaldoAcumulado('brenda');
+
+  // Valores do Mês (Para os cards)
+  const despesasFixasMes = extratoCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Fixa').reduce((acc, i) => acc + Number(i.valor), 0);
+  const despesasVariaveisMes = extratoCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Variável').reduce((acc, i) => acc + Number(i.valor), 0);
 
   // Motor do Ciclo
   let infoCiclo = { fase: "Aguardando dados...", cor: "text-gray-400", diasProxima: 0, ovulacaoData: '' };
@@ -192,7 +216,7 @@ function App() {
     infoCiclo.diasProxima = Math.ceil((proximaMenstruacao - hoje) / (1000 * 60 * 60 * 24));
     infoCiclo.ovulacaoData = ovulacao.toLocaleDateString('pt-BR');
 
-    if (diaDoCicloAtual >= 1 && diaDoCicloAtual <= 5) { infoCiclo.fase = "🩸 Menstruação (Sangramento Ativo)"; infoCiclo.cor = "text-red-500"; }
+    if (diaDoCicloAtual >= 1 && diaDoCicloAtual <= 5) { infoCiclo.fase = "🩸 Menstruação (Ativo)"; infoCiclo.cor = "text-red-500"; }
     else if (hoje >= inicioFertil && hoje <= fimFertil) {
       if (hoje.getTime() === ovulacao.getTime()) { infoCiclo.fase = "🥚 Dia de Ovulação"; infoCiclo.cor = "text-purple-500"; }
       else { infoCiclo.fase = "✨ Período Fértil"; infoCiclo.cor = "text-purple-400"; }
@@ -222,6 +246,7 @@ function App() {
           <button onClick={() => {setAba('DASHBOARD'); setIsMenuOpen(false)}} className="block w-full text-left py-3 font-bold border-b border-gray-500/20 italic">📊 Dashboard Casal</button>
           <button onClick={() => {setAba('CELIO'); setIsMenuOpen(false)}} className="block w-full text-left py-3 font-bold border-b border-gray-500/20 italic text-blue-500">💼 Espaço Célio</button>
           <button onClick={() => {setAba('BRENDA'); setIsMenuOpen(false)}} className="block w-full text-left py-3 font-bold border-b border-gray-500/20 italic text-pink-500">🌸 Espaço Brenda</button>
+          <button onClick={() => {setAba('CONTRATOS'); setIsMenuOpen(false)}} className="block w-full text-left py-3 font-bold border-b border-gray-500/20 italic text-yellow-500">🔁 Contas Fixas</button>
           <button onClick={() => {setAba('CONFIG'); setIsMenuOpen(false)}} className="block w-full text-left py-3 font-bold border-b border-gray-500/20 italic">⚙️ Configurações</button>
           <button onClick={alternarTema} className="mt-8 flex items-center gap-2 font-black text-xs uppercase tracking-widest text-purple-500">
             {isDark ? '☀️ Mudar para Claro' : '🌙 Mudar para Escuro'}
@@ -243,12 +268,11 @@ function App() {
       </header>
 
       <main className="max-w-md mx-auto px-6 pb-32">
-        {/* NAVEGAÇÃO DE MESES GLOBAL */}
-        {aba !== 'CONFIG' && (
+        {aba !== 'CONFIG' && aba !== 'CONTRATOS' && (
           <div className="flex justify-between items-center mb-6 px-4">
-             <button onClick={irMesAnterior} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❮</button>
+             <button onClick={() => setDataFiltro(new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() - 1, 1))} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❮</button>
              <span className="font-black text-sm uppercase tracking-widest">{nomeMesAtual}</span>
-             <button onClick={irMesProximo} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❯</button>
+             <button onClick={() => setDataFiltro(new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 1))} className={`p-2 rounded-full ${bgCard} active:scale-90`}>❯</button>
           </div>
         )}
 
@@ -259,12 +283,6 @@ function App() {
               <h1 className={`text-5xl font-black tracking-tighter ${saldoAtualCasal < 0 ? 'text-red-400' : 'text-white'}`}>
                 R$ {saldoAtualCasal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
               </h1>
-              <div className="flex justify-between mt-6 pt-4 border-t border-white/20 text-[9px] font-black uppercase tracking-widest">
-                 <div>
-                    <span className="opacity-50 block mb-1">Ponto Zero</span>
-                    <span className="text-white">R$ {Number(config.saldo_inicial).toFixed(2)}</span>
-                 </div>
-              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4 mb-8">
@@ -280,12 +298,12 @@ function App() {
 
             <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato do Mês</h3>
             <div className="space-y-3">
-              {gastosCasalMes.length === 0 ? (
-                 <p className={`text-center text-xs font-bold py-8 ${textMuted}`}>Nenhum lançamento neste mês.</p>
-              ) : gastosCasalMes.map(i => (
+              {extratoCasalMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer transition-all hover:border-purple-500/20 active:scale-[0.98] ${bgCard}`}>
                   <div className="flex items-center gap-4">
-                    <div className={`w-2 h-2 rounded-full ${i.tipo === 'entrada' ? 'bg-green-500' : (i.previsibilidade === 'Fixa' ? 'bg-red-600' : 'bg-orange-400')}`}></div>
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs ${i.isVirtual ? 'bg-yellow-500/20' : (i.tipo === 'entrada' ? 'bg-green-500/20' : 'bg-red-500/20')}`}>
+                       {i.isVirtual ? '🔁' : (i.tipo === 'entrada' ? '💰' : '💸')}
+                    </div>
                     <div>
                       <p className="font-bold text-sm leading-none mb-1">{i.descricao}</p>
                       <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.usuario} • {i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
@@ -307,11 +325,13 @@ function App() {
                <h2 className="font-black text-2xl uppercase italic">Caixa Pessoal Célio</h2>
                <h1 className="text-4xl font-black mt-4">R$ {saldoCelio.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
-            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
-            {lancamentosDoMes.filter(i => i.escopo === 'celio').map(i => (
+            {extratoCelioMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <div>
-                     <p className="font-bold text-sm">{i.descricao}</p>
+                     <p className="font-bold text-sm">
+                       {i.isVirtual && <span className="mr-2">🔁</span>}
+                       {i.descricao}
+                     </p>
                      <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
                   </div>
                   <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
@@ -327,40 +347,13 @@ function App() {
                <h2 className="font-black text-2xl uppercase italic">Caixa Pessoal Brenda</h2>
                <h1 className="text-4xl font-black mt-4">R$ {saldoBrenda.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
-            
-            <div className={`p-6 rounded-[2rem] border ${bgCard}`}>
-               <h3 className="font-black text-xl text-pink-500 italic uppercase mb-6 flex justify-between items-center">
-                  <span>🌸 Saúde Íntima</span>
-                  <span className="text-[10px] bg-pink-500/20 px-3 py-1 rounded-full font-black">
-                    {infoCiclo.diasProxima > 0 ? `${infoCiclo.diasProxima} DIAS P/ PRÓXIMA` : 'ATRASADO'}
-                  </span>
-               </h3>
-               <div className="mb-6 text-center bg-black/5 p-5 rounded-3xl border border-white/5">
-                  <p className={`text-xl font-black uppercase ${infoCiclo.cor}`}>{infoCiclo.fase}</p>
-                  {infoCiclo.ovulacaoData && (
-                     <p className={`text-[10px] font-black uppercase mt-3 ${textMuted}`}>Data provável da Ovulação: {infoCiclo.ovulacaoData}</p>
-                  )}
-               </div>
-               <form onSubmit={salvarCiclo} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Dia 1 (Sangramento)</label>
-                      <input type="date" value={ciclo.data_inicio} onChange={e => setCiclo({...ciclo, data_inicio: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} />
-                    </div>
-                    <div>
-                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Duração Média</label>
-                      <input type="number" placeholder="28" value={ciclo.duracao} onChange={e => setCiclo({...ciclo, duracao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} />
-                    </div>
-                  </div>
-                  <button type="submit" className="w-full bg-pink-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95 transition-transform mt-2">Calcular Ciclo</button>
-               </form>
-            </div>
-            
-            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
-            {lancamentosDoMes.filter(i => i.escopo === 'brenda').map(i => (
+            {extratoBrendaMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <div>
-                     <p className="font-bold text-sm">{i.descricao}</p>
+                     <p className="font-bold text-sm">
+                       {i.isVirtual && <span className="mr-2">🔁</span>}
+                       {i.descricao}
+                     </p>
                      <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
                   </div>
                   <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
@@ -369,38 +362,86 @@ function App() {
           </div>
         )}
 
+        {/* NOVA ABA: CONTRATOS E ASSINATURAS */}
+        {aba === 'CONTRATOS' && (
+          <div className="animate-in fade-in duration-500 space-y-6">
+            <div className="bg-yellow-600 text-white p-8 rounded-[3rem] shadow-xl mb-8">
+               <h2 className="font-black text-2xl uppercase italic mb-2">Contas Fixas</h2>
+               <p className="text-xs font-bold opacity-80">Cadastre Salários, Aluguéis ou Assinaturas. Eles cairão na conta automaticamente todos os meses.</p>
+            </div>
+
+            <form onSubmit={salvarContratoFixo} className={`p-6 rounded-[2rem] border ${bgCard} space-y-4`}>
+              <h3 className="font-black text-sm uppercase italic mb-4">Novo Contrato Fixo</h3>
+              <input type="text" placeholder="Ex: Aluguel Betim, Salário Célio" value={formContrato.descricao} onChange={e => setFormContrato({...formContrato, descricao: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-bold text-sm ${inputClass}`} required />
+              <div className="grid grid-cols-2 gap-3">
+                 <input type="number" placeholder="R$ 0,00" value={formContrato.valor} onChange={e => setFormContrato({...formContrato, valor: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-black text-lg ${inputClass}`} required />
+                 <select value={formContrato.tipo} onChange={e => setFormContrato({...formContrato, tipo: e.target.value})} className={`w-full p-4 rounded-xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
+                    <option value="despesa">💸 Pagar (Saída)</option>
+                    <option value="entrada">💰 Receber (Entrada)</option>
+                 </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <select value={formContrato.escopo} onChange={e => setFormContrato({...formContrato, escopo: e.target.value})} className={`w-full p-4 rounded-xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
+                   <option value="casal">🌍 Conta Casal</option>
+                   <option value="celio">💼 Pessoal Célio</option>
+                   <option value="brenda">🌸 Pessoal Brenda</option>
+                </select>
+                <input type="date" value={formContrato.data_inicio} onChange={e => setFormContrato({...formContrato, data_inicio: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-bold text-[10px] ${inputClass}`} required />
+              </div>
+              <button type="submit" className="w-full bg-yellow-500 text-black py-4 rounded-xl font-black text-xs uppercase shadow-xl active:scale-95 transition-transform mt-2">Ativar Conta Fixa</button>
+            </form>
+
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mt-8 mb-4 ${textMuted}`}>Contratos Ativos</h3>
+            <div className="space-y-3">
+              {contratos.map(c => (
+                <div key={c.id} className={`p-5 rounded-[1.5rem] border ${bgCard}`}>
+                  <div className="flex justify-between items-start mb-2">
+                     <div>
+                        <p className="font-black text-sm">{c.descricao}</p>
+                        <p className={`text-[9px] font-black uppercase ${textMuted}`}>Desde {new Date(c.data_inicio).toLocaleDateString('pt-BR')} • {c.escopo}</p>
+                     </div>
+                     <p className={`font-black text-lg ${c.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(c.valor).toFixed(2)}</p>
+                  </div>
+                  <button onClick={() => apagarContratoFixo(c.id)} className="text-[10px] font-black text-red-500 uppercase mt-2 bg-red-500/10 px-4 py-2 rounded-lg">Encerrar / Apagar</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {aba === 'CONFIG' && (
           <div className={`p-8 rounded-[3rem] border space-y-6 ${bgCard}`}>
             <h2 className="font-black text-2xl italic uppercase text-purple-500 mb-8">Ponto de Partida</h2>
             <div>
-              <label className={`text-[9px] font-black uppercase block mb-2 ${textMuted}`}>Data de Início do App</label>
-              <input type="date" value={config.data_inicio} onChange={e => setConfig({...config, data_inicio: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-lg ${inputClass}`} />
-            </div>
-            <div>
               <label className={`text-[9px] font-black uppercase block mb-2 ${textMuted}`}>Saldo no Banco (Ponto Zero)</label>
               <input type="number" value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} placeholder="Pode deixar em branco ou 0" className={`w-full p-4 rounded-2xl border outline-none font-bold text-xl ${inputClass}`} />
             </div>
-            <button onClick={salvarConfiguracoes} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95">💾 Salvar Ponto Zero</button>
+            <button onClick={async () => {
+              await supabase.from('configuracoes').upsert({id: 1, ...config});
+              alert("Marco Zero configurado!"); carregarDados();
+            }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95">💾 Salvar Ponto Zero</button>
           </div>
         )}
       </main>
 
-      <button onClick={() => setShowModal(true)} className="fixed bottom-8 left-1/2 -translate-x-1/2 w-16 h-16 bg-gradient-to-tr from-purple-700 to-purple-500 text-white rounded-full shadow-[0_10px_40px_rgba(147,51,234,0.6)] flex items-center justify-center text-3xl font-bold z-40 active:scale-90 transition-transform">
-        +
-      </button>
+      {/* BOTÃO FLUTUANTE DE GASTO AVULSO */}
+      {aba !== 'CONTRATOS' && (
+        <button onClick={() => setShowModal(true)} className="fixed bottom-8 left-1/2 -translate-x-1/2 w-16 h-16 bg-gradient-to-tr from-purple-700 to-purple-500 text-white rounded-full shadow-[0_10px_40px_rgba(147,51,234,0.6)] flex items-center justify-center text-3xl font-bold z-40 active:scale-90 transition-transform">
+          +
+        </button>
+      )}
 
       {showModal && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-md">
           <div className={`w-full max-w-sm p-8 rounded-[3rem] border shadow-2xl ${isDark ? 'bg-[#121418] border-white/10' : 'bg-white border-slate-200'}`}>
             <div className="flex justify-between items-center mb-6">
               <h3 className="font-black text-xl italic uppercase">
-                {editingEntryId ? 'Editar Lançamento' : 'Lançamento'}
+                {editingEntryId ? 'Editar Lançamento' : 'Gasto Avulso'}
               </h3>
               <button onClick={fecharModal} className={`text-2xl ${textMuted}`}>✕</button>
             </div>
             
             <form onSubmit={salvarGasto} className="space-y-4">
-              
               <div>
                 <select value={form.escopo} onChange={e => setForm({...form, escopo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[11px] font-black uppercase ${inputClass}`}>
                    <option value="casal">🌍 Conta Central do Casal</option>
@@ -417,7 +458,7 @@ function App() {
                 </div>
               )}
 
-              <input type="text" placeholder="No que foi? (Ex: Aluguel)" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold ${inputClass}`} required />
+              <input type="text" placeholder="O que foi? (Ex: iFood, Lazer)" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold ${inputClass}`} required />
               
               <div className="grid grid-cols-2 gap-3">
                  <input type="text" inputMode="decimal" placeholder="R$ 0,00" value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-black text-xl ${inputClass}`} required />
@@ -432,18 +473,9 @@ function App() {
                     <option value="À Vista">💵 À Vista</option>
                     <option value="Cartão de Crédito">💳 Crédito</option>
                  </select>
-                 <select value={form.previsibilidade} onChange={e => setForm({...form, previsibilidade: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[9px] font-black uppercase ${inputClass}`}>
-                    <option value="Variável">🍔 Variável</option>
-                    <option value="Fixa">🏠 Fixa</option>
-                 </select>
+                 <input type="date" value={form.data} onChange={e => setForm({...form, data: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-[10px] ${inputClass}`} required />
               </div>
 
-              {/* NOVO: Campo de Data no Lançamento */}
-              <div>
-                 <label className={`text-[9px] font-black uppercase block mb-1 mt-2 ${textMuted}`}>Data do Ocorrido</label>
-                 <input type="date" value={form.data} onChange={e => setForm({...form, data: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} required />
-              </div>
-              
               <div className="flex gap-3 mt-6 pt-6 border-t border-gray-500/10">
                   {editingEntryId && (
                     <button type="button" onClick={apagarLancamento} className="flex-1 bg-gray-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase active:scale-95 transition-all">
