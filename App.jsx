@@ -10,7 +10,6 @@ function App() {
   const [config, setConfig] = useState({ saldo_inicial: 0, renda_fixa: 0 });
   const [ciclo, setCiclo] = useState({ data_inicio: '', duracao: 28, idade: '', fatores: '' });
   
-  // Novo formulário com 'escopo'
   const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal' });
   
   const [fotoUrl, setFotoUrl] = useState(null);
@@ -57,7 +56,6 @@ function App() {
     carregarDados();
   };
 
-  // Lógica de Separação (Casal vs Pessoal)
   const gastosCasal = lancamentos.filter(i => i.escopo === 'casal');
   const gastosCelio = lancamentos.filter(i => i.escopo === 'celio');
   const gastosBrenda = lancamentos.filter(i => i.escopo === 'brenda');
@@ -69,7 +67,6 @@ function App() {
   const saldoCelio = gastosCelio.reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
   const saldoBrenda = gastosBrenda.reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
 
-  // Lógica do Ciclo Menstrual
   let diasParaProxima = 0;
   let faseAtual = "Aguardando dados...";
   let corFase = "text-gray-400";
@@ -86,7 +83,6 @@ function App() {
     else { faseAtual = "Fase Lútea"; corFase = "text-blue-400"; }
   }
 
-  // --- CLASSES DINÂMICAS DE TEMA ---
   const isDark = tema === 'dark';
   const bgBody = isDark ? 'bg-[#0a0b0e]' : 'bg-slate-100';
   const textBody = isDark ? 'text-white' : 'text-slate-900';
@@ -98,7 +94,6 @@ function App() {
   return (
     <div className={`min-h-screen ${bgBody} ${textBody} font-sans overflow-x-hidden transition-colors duration-300`}>
       
-      {/* MENU LATERAL */}
       <div className={`fixed inset-y-0 left-0 w-72 ${bgMenu} z-50 transform ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-500 p-8`}>
         <div className="flex justify-between items-center mb-10">
           <h2 className="font-black italic text-xl">MENU</h2>
@@ -116,7 +111,6 @@ function App() {
         </div>
       </div>
 
-      {/* HEADER */}
       <header className="p-6 flex justify-between items-center max-w-md mx-auto">
         <button onClick={() => setIsMenuOpen(true)} className={`text-2xl p-2 rounded-xl ${isDark ? 'bg-white/5' : 'bg-slate-200'}`}>☰</button>
         <div className="text-right">
@@ -132,7 +126,6 @@ function App() {
         </div>
       </header>
 
-      {/* DASHBOARD PRINCIPAL */}
       <main className="max-w-md mx-auto px-6 pb-32">
         {aba === 'DASHBOARD' && (
           <div className="animate-in fade-in duration-500">
@@ -160,7 +153,6 @@ function App() {
           </div>
         )}
 
-        {/* ESPAÇO CÉLIO */}
         {aba === 'CELIO' && (
           <div className="animate-in fade-in duration-500 space-y-6">
             <div className="bg-blue-600 text-white p-8 rounded-[3rem] shadow-xl text-center">
@@ -177,7 +169,6 @@ function App() {
           </div>
         )}
 
-        {/* ESPAÇO BRENDA & CICLO */}
         {aba === 'BRENDA' && (
           <div className="animate-in fade-in duration-500 space-y-8">
             <div className="bg-pink-600 text-white p-8 rounded-[3rem] shadow-xl text-center">
@@ -186,7 +177,6 @@ function App() {
                <h1 className="text-4xl font-black mt-4">R$ {saldoBrenda.toLocaleString('pt-BR')}</h1>
             </div>
             
-            {/* O NOVO MOTOR DO CICLO MENSTRUAL */}
             <div className={`p-6 rounded-[2rem] border ${bgCard}`}>
                <h3 className="font-black text-xl text-pink-500 italic uppercase mb-6 flex justify-between items-center">
                   <span>🌸 Ciclo Menstrual</span>
@@ -215,4 +205,71 @@ function App() {
                       <input type="number" value={ciclo.idade} onChange={e => setCiclo({...ciclo, idade: e.target.value})} className={`w-full p-3 rounded-xl border outline-none font-bold text-xs ${inputClass}`} />
                     </div>
                     <div>
-                      <label
+                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Fatores Externos</label>
+                      <select value={ciclo.fatores} onChange={e => setCiclo({...ciclo, fatores: e.target.value})} className={`w-full p-3 rounded-xl border outline-none font-bold text-[10px] uppercase ${inputClass}`}>
+                         <option value="">Nenhum</option>
+                         <option value="Estresse">Ansiedade/Estresse</option>
+                         <option value="Anticoncepcional">Anticoncepcional</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full bg-pink-500 text-white py-4 rounded-xl font-black text-xs uppercase shadow-lg active:scale-95 transition-transform">Salvar Dados de Saúde</button>
+               </form>
+            </div>
+            
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato Privado</h3>
+            {gastosBrenda.map(i => (
+                <div key={i.id} className={`p-4 rounded-[1.5rem] border flex justify-between items-center ${bgCard}`}>
+                  <p className="font-bold text-sm">{i.descricao}</p>
+                  <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
+                </div>
+            ))}
+          </div>
+        )}
+
+        {aba === 'CONFIG' && (
+          <div className={`p-8 rounded-[3rem] border space-y-6 ${bgCard}`}>
+            <h2 className="font-black text-xl italic uppercase">Configurações Base</h2>
+            <div>
+              <label className={`text-[10px] font-black uppercase block mb-2 ${textMuted}`}>Seu Ponto Zero</label>
+              <input type="number" value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xl ${inputClass}`} />
+            </div>
+            <button onClick={async () => await supabase.from('configuracoes').upsert({id: 1, ...config})} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95">💾 Salvar Alterações</button>
+          </div>
+        )}
+      </main>
+
+      <button onClick={() => setShowModal(true)} className="fixed bottom-10 left-1/2 -translate-x-1/2 w-16 h-16 bg-purple-600 text-white rounded-full shadow-[0_10px_30px_rgba(147,51,234,0.5)] flex items-center justify-center text-3xl font-bold z-40 active:scale-90 transition-transform">
+        +
+      </button>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className={`w-full max-w-sm p-8 rounded-[3rem] border shadow-2xl ${isDark ? 'bg-[#121418] border-white/10' : 'bg-white border-slate-200'}`}>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-black text-lg italic uppercase">Lançamento</h3>
+              <button onClick={() => setShowModal(false)} className={`text-2xl ${textMuted}`}>✕</button>
+            </div>
+            
+            <form onSubmit={salvarGasto} className="space-y-4">
+              
+              <div>
+                <label className={`text-[9px] font-black uppercase block mb-1 ${textMuted}`}>Onde este gasto vai entrar?</label>
+                <select value={form.escopo} onChange={e => setForm({...form, escopo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[11px] font-black uppercase ${inputClass}`}>
+                   <option value="casal">🌍 Conta do Casal (Geral)</option>
+                   <option value="celio">💼 Pessoal Célio</option>
+                   <option value="brenda">🌸 Pessoal Brenda</option>
+                </select>
+              </div>
+
+              {form.escopo === 'casal' && (
+                <div className={`flex gap-2 p-1 rounded-2xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                  {['Célio', 'Brenda'].map(u => (
+                    <button key={u} type="button" onClick={() => setForm({...form, usuario: u})} className={`flex-1 py-3 rounded-xl text-[10px] font-black transition-all ${form.usuario === u ? (isDark ? 'bg-white text-black' : 'bg-slate-800 text-white') : textMuted}`}>{u.toUpperCase()}</button>
+                  ))}
+                </div>
+              )}
+
+              <input type="text" placeholder="O que foi?" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold ${inputClass}`} />
+              
+              <div className="grid grid-cols-2 gap-3">
