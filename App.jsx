@@ -7,11 +7,13 @@ function App() {
   const [showModal, setShowModal] = useState(false);
   const [tema, setTema] = useState('dark');
   const [lancamentos, setLancamentos] = useState([]);
-  const [config, setConfig] = useState({ saldo_inicial: 0, renda_fixa: 0 });
-  const [ciclo, setCiclo] = useState({ data_inicio: '', duracao: 28, idade: '', fatores: '' });
+  const [config, setConfig] = useState({ saldo_inicial: 0, data_inicio: '' });
+  const [ciclo, setCiclo] = useState({ data_inicio: '', duracao: 28 });
   
-  const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal' });
+  // Novo formulário com 'previsibilidade' (Fixo/Variável)
+  const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável' });
   const [fotoUrl, setFotoUrl] = useState(null);
+  const [salvandoFoto, setSalvandoFoto] = useState(false);
   const fileInputRef = useRef(null);
 
   const carregarDados = async () => {
@@ -35,51 +37,101 @@ function App() {
     await supabase.from('configuracoes').upsert({ id: 1, tema: novoTema });
   };
 
+  const subirFoto = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSalvandoFoto(true);
+    
+    const { error } = await supabase.storage.from('perfis').upload('casal.png', file, { upsert: true, cacheControl: '0' });
+    
+    setSalvandoFoto(false);
+    if (error) {
+      alert("Erro ao salvar foto. Verifique as permissões no Supabase (RLS). Erro: " + error.message);
+    } else {
+      carregarDados();
+    }
+  };
+
   const salvarGasto = async (e) => {
     e.preventDefault();
     const v = parseFloat(String(form.valor).replace(',', '.'));
     await supabase.from('fluxo').insert([{ 
       descricao: form.descricao, valor: v, tipo: form.tipo, 
-      usuario: form.usuario, forma_pagamento: form.forma, escopo: form.escopo,
+      usuario: form.usuario, forma_pagamento: form.forma, escopo: form.escopo, previsibilidade: form.previsibilidade,
       mes: new Intl.DateTimeFormat('pt-BR', {month: 'long'}).format(new Date()) 
     }]);
     setShowModal(false);
-    setForm({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal' });
+    setForm({ ...form, descricao: '', valor: '' }); // Limpa só os campos de texto
     carregarDados();
   };
 
   const salvarCiclo = async (e) => {
     e.preventDefault();
     await supabase.from('ciclo_brenda').upsert({ id: 1, ...ciclo });
-    alert("Dados do ciclo atualizados!");
+    alert("Dados do ciclo sincronizados com sucesso!");
     carregarDados();
   };
 
+  // FILTROS FINANCEIROS (CASAL)
   const gastosCasal = lancamentos.filter(i => i.escopo === 'casal');
-  const gastosCelio = lancamentos.filter(i => i.escopo === 'celio');
-  const gastosBrenda = lancamentos.filter(i => i.escopo === 'brenda');
-
-  const totalGastosCasal = gastosCasal.reduce((acc, i) => i.tipo === 'despesa' ? acc + Number(i.valor) : acc, 0);
-  const totalEntradasCasal = gastosCasal.reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc, 0);
+  const entradasCasal = gastosCasal.filter(i => i.tipo === 'entrada');
+  const despesasCasal = gastosCasal.filter(i => i.tipo === 'despesa');
+  
+  const despesasFixas = despesasCasal.filter(i => i.previsibilidade === 'Fixa').reduce((acc, i) => acc + Number(i.valor), 0);
+  const despesasVariaveis = despesasCasal.filter(i => i.previsibilidade === 'Variável').reduce((acc, i) => acc + Number(i.valor), 0);
+  
+  const totalEntradasCasal = entradasCasal.reduce((acc, i) => acc + Number(i.valor), 0);
+  const totalGastosCasal = despesasFixas + despesasVariaveis;
   const saldoAtualCasal = Number(config.saldo_inicial) + totalEntradasCasal - totalGastosCasal;
 
-  const saldoCelio = gastosCelio.reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
-  const saldoBrenda = gastosBrenda.reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
+  // FILTROS PESSOAIS
+  const saldoCelio = lancamentos.filter(i => i.escopo === 'celio').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
+  const saldoBrenda = lancamentos.filter(i => i.escopo === 'brenda').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
 
-  let diasParaProxima = 0;
-  let faseAtual = "Aguardando dados...";
-  let corFase = "text-gray-400";
+  // MOTOR DO CICLO MENSTRUAL (MÉTODO DRAUZIO VARELLA)
+  let infoCiclo = { fase: "Aguardando dados...", cor: "text-gray-400", diasProxima: 0, ovulacaoData: '' };
+  
   if (ciclo.data_inicio) {
     const hoje = new Date();
-    const inicio = new Date(ciclo.data_inicio);
-    const diferencaDias = Math.floor((hoje - inicio) / (1000 * 60 * 60 * 24));
-    const diaDoCiclo = (diferencaDias % ciclo.duracao) + 1;
-    diasParaProxima = ciclo.duracao - diaDoCiclo;
+    hoje.setHours(0,0,0,0);
+    
+    // Converte a data do banco corrigindo fuso horário
+    const inicio = new Date(ciclo.data_inicio + 'T00:00:00'); 
+    
+    // Próxima Menstruação (Início + Duração)
+    const proximaMenstruacao = new Date(inicio);
+    proximaMenstruacao.setDate(inicio.getDate() + Number(ciclo.duracao));
+    
+    // Ovulação (14 dias ANTES da próxima menstruação)
+    const ovulacao = new Date(proximaMenstruacao);
+    ovulacao.setDate(proximaMenstruacao.getDate() - 14);
+    
+    // Período Fértil (5 dias antes, 1 dia depois da ovulação)
+    const inicioFertil = new Date(ovulacao);
+    inicioFertil.setDate(ovulacao.getDate() - 5);
+    const fimFertil = new Date(ovulacao);
+    fimFertil.setDate(ovulacao.getDate() + 1);
 
-    if (diaDoCiclo >= 1 && diaDoCiclo <= 5) { faseAtual = "Menstruação"; corFase = "text-red-500"; }
-    else if (diaDoCiclo >= 6 && diaDoCiclo <= 11) { faseAtual = "Fase Folicular"; corFase = "text-pink-400"; }
-    else if (diaDoCiclo >= 12 && diaDoCiclo <= 16) { faseAtual = "Período Fértil"; corFase = "text-purple-500"; }
-    else { faseAtual = "Fase Lútea"; corFase = "text-blue-400"; }
+    const diaDoCicloAtual = Math.floor((hoje - inicio) / (1000 * 60 * 60 * 24)) + 1;
+    infoCiclo.diasProxima = Math.ceil((proximaMenstruacao - hoje) / (1000 * 60 * 60 * 24));
+    infoCiclo.ovulacaoData = ovulacao.toLocaleDateString('pt-BR');
+
+    if (diaDoCicloAtual >= 1 && diaDoCicloAtual <= 5) { 
+      infoCiclo.fase = "🩸 Menstruação (Sangramento Ativo)"; infoCiclo.cor = "text-red-500"; 
+    } else if (hoje >= inicioFertil && hoje <= fimFertil) {
+      if (hoje.getTime() === ovulacao.getTime()) {
+        infoCiclo.fase = "🥚 Dia de Ovulação (Alta Fertilidade!)"; infoCiclo.cor = "text-purple-500";
+      } else {
+        infoCiclo.fase = "✨ Período Fértil"; infoCiclo.cor = "text-purple-400";
+      }
+    } else if (hoje > fimFertil && hoje < proximaMenstruacao) {
+      infoCiclo.fase = "🌥️ Fase Lútea (TPM)"; infoCiclo.cor = "text-blue-400";
+    } else if (diaDoCicloAtual > 5 && hoje < inicioFertil) {
+      infoCiclo.fase = "🌱 Fase Folicular"; infoCiclo.cor = "text-pink-400";
+    } else {
+      infoCiclo.fase = "🔄 Ciclo Atrasado/Nova Contagem"; infoCiclo.cor = "text-orange-500";
+      infoCiclo.diasProxima = 0;
+    }
   }
 
   const isDark = tema === 'dark';
@@ -110,19 +162,17 @@ function App() {
         </div>
       </div>
 
-      {/* HEADER */}
+      {/* HEADER E FOTO DE PERFIL */}
       <header className="p-6 flex justify-between items-center max-w-md mx-auto">
         <button onClick={() => setIsMenuOpen(true)} className={`text-2xl p-2 rounded-xl ${isDark ? 'bg-white/5' : 'bg-slate-200'}`}>☰</button>
         <div className="text-right">
            <span className={`block text-[10px] font-black uppercase ${textMuted}`}>Olá, Casal</span>
            <span className="text-xs font-bold text-purple-500 italic">Célio & Brenda</span>
         </div>
-        <div onClick={() => fileInputRef.current.click()} className="w-12 h-12 rounded-full border-2 border-purple-600 overflow-hidden cursor-pointer shadow-lg shadow-purple-500/20">
-           <img src={fotoUrl || 'https://via.placeholder.com/150'} className="w-full h-full object-cover" />
-           <input type="file" ref={fileInputRef} onChange={async (e) => {
-             const file = e.target.files[0];
-             if (file) { await supabase.storage.from('perfis').upload('casal.png', file, { upsert: true }); carregarDados(); }
-           }} className="hidden" />
+        
+        <div onClick={() => !salvandoFoto && fileInputRef.current.click()} className={`w-12 h-12 rounded-full border-2 border-purple-600 overflow-hidden cursor-pointer shadow-lg relative flex items-center justify-center ${salvandoFoto ? 'animate-pulse bg-purple-900' : ''}`}>
+           {salvandoFoto ? <span className="text-[8px] font-black">⚙️</span> : <img src={fotoUrl || 'https://via.placeholder.com/150'} className="w-full h-full object-cover" />}
+           <input type="file" accept="image/*" ref={fileInputRef} onChange={subirFoto} className="hidden" />
         </div>
       </header>
 
@@ -130,19 +180,43 @@ function App() {
       <main className="max-w-md mx-auto px-6 pb-32">
         {aba === 'DASHBOARD' && (
           <div className="animate-in fade-in duration-500">
-            <div className="bg-gradient-to-br from-purple-800 via-indigo-900 to-black p-8 rounded-[3rem] shadow-2xl mb-10 text-white relative overflow-hidden">
-              <p className="text-[10px] font-black opacity-60 uppercase mb-1">Conta Conjunta</p>
-              <h1 className="text-5xl font-black tracking-tighter">R$ {saldoAtualCasal.toLocaleString('pt-BR')}</h1>
+            <div className="bg-gradient-to-br from-purple-800 via-indigo-900 to-black p-8 rounded-[3rem] shadow-2xl mb-8 text-white relative overflow-hidden">
+              <p className="text-[10px] font-black opacity-60 uppercase mb-1">Caixa Geral do Casal</p>
+              <h1 className="text-5xl font-black tracking-tighter">R$ {saldoAtualCasal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
+              
+              <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-white/20 text-[9px] font-black uppercase tracking-widest">
+                 <div>
+                    <span className="opacity-50 block mb-1">Início da Contagem</span>
+                    <span className="text-green-400">{config.data_inicio ? new Date(config.data_inicio).toLocaleDateString('pt-BR') : 'Não definido'}</span>
+                 </div>
+                 <div className="text-right">
+                    <span className="opacity-50 block mb-1">Ponto Zero</span>
+                    <span className="text-white">R$ {Number(config.saldo_inicial).toFixed(2)}</span>
+                 </div>
+              </div>
             </div>
-            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Histórico do Casal</h3>
+
+            {/* RESUMO FIXO VS VARIÁVEL */}
+            <div className="grid grid-cols-2 gap-4 mb-8">
+               <div className={`p-5 rounded-[2rem] border ${bgCard}`}>
+                  <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Despesas Fixas</p>
+                  <p className="text-lg font-black text-red-500">R$ {despesasFixas.toFixed(2)}</p>
+               </div>
+               <div className={`p-5 rounded-[2rem] border ${bgCard}`}>
+                  <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Despesas Variáveis</p>
+                  <p className="text-lg font-black text-orange-400">R$ {despesasVariaveis.toFixed(2)}</p>
+               </div>
+            </div>
+
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Últimos Lançamentos (Geral)</h3>
             <div className="space-y-3">
-              {gastosCasal.map(i => (
+              {gastosCasal.slice(0, 10).map(i => (
                 <div key={i.id} className={`p-4 rounded-[1.5rem] border flex justify-between items-center ${bgCard}`}>
                   <div className="flex items-center gap-4">
-                    <div className={`w-2 h-2 rounded-full ${i.tipo === 'entrada' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                    <div className={`w-2 h-2 rounded-full ${i.tipo === 'entrada' ? 'bg-green-500' : (i.previsibilidade === 'Fixa' ? 'bg-red-600' : 'bg-orange-400')}`}></div>
                     <div>
-                      <p className="font-bold text-sm">{i.descricao}</p>
-                      <p className={`text-[9px] font-black uppercase ${textMuted}`}>{i.usuario} • {i.forma_pagamento}</p>
+                      <p className="font-bold text-sm leading-none mb-1">{i.descricao}</p>
+                      <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.usuario} • {i.previsibilidade} • {i.forma_pagamento}</p>
                     </div>
                   </div>
                   <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>
@@ -154,14 +228,14 @@ function App() {
           </div>
         )}
 
-        {/* ESPAÇO CÉLIO */}
         {aba === 'CELIO' && (
           <div className="animate-in fade-in duration-500 space-y-6">
             <div className="bg-blue-600 text-white p-8 rounded-[3rem] shadow-xl text-center">
                <h2 className="font-black text-2xl uppercase italic">Gasto Pessoal Célio</h2>
-               <h1 className="text-4xl font-black mt-4">R$ {saldoCelio.toLocaleString('pt-BR')}</h1>
+               <p className="text-xs opacity-70 mt-2">Este valor é seu e não afeta o caixa conjunto.</p>
+               <h1 className="text-4xl font-black mt-4">R$ {saldoCelio.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
-            {gastosCelio.map(i => (
+            {lancamentos.filter(i => i.escopo === 'celio').map(i => (
                 <div key={i.id} className={`p-4 rounded-[1.5rem] border flex justify-between items-center ${bgCard}`}>
                   <p className="font-bold text-sm">{i.descricao}</p>
                   <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
@@ -170,102 +244,142 @@ function App() {
           </div>
         )}
 
-        {/* ESPAÇO BRENDA */}
         {aba === 'BRENDA' && (
           <div className="animate-in fade-in duration-500 space-y-8">
             <div className="bg-pink-600 text-white p-8 rounded-[3rem] shadow-xl text-center">
-               <h2 className="font-black text-2xl uppercase italic">Gasto Pessoal Brenda</h2>
-               <h1 className="text-4xl font-black mt-4">R$ {saldoBrenda.toLocaleString('pt-BR')}</h1>
+               <h2 className="font-black text-2xl uppercase italic">Caixa Pessoal Brenda</h2>
+               <h1 className="text-4xl font-black mt-4">R$ {saldoBrenda.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
             
+            {/* MOTOR DO CICLO ATUALIZADO */}
             <div className={`p-6 rounded-[2rem] border ${bgCard}`}>
                <h3 className="font-black text-xl text-pink-500 italic uppercase mb-6 flex justify-between items-center">
-                  <span>🌸 Ciclo Menstrual</span>
-                  <span className="text-[10px] bg-pink-500/20 px-3 py-1 rounded-full">{diasParaProxima} dias para a próxima</span>
+                  <span>🌸 Saúde Íntima</span>
+                  <span className="text-[10px] bg-pink-500/20 px-3 py-1 rounded-full font-black">
+                    {infoCiclo.diasProxima > 0 ? `${infoCiclo.diasProxima} DIAS PARA A PRÓXIMA` : 'ATRASADO'}
+                  </span>
                </h3>
-               <div className="mb-8 text-center bg-black/5 p-4 rounded-2xl">
-                  <p className={`text-2xl font-black uppercase ${corFase}`}>{faseAtual}</p>
-                  <p className={`text-[10px] font-black uppercase mt-1 ${textMuted}`}>Fase Atual do Ciclo</p>
+               <div className="mb-6 text-center bg-black/5 p-5 rounded-3xl border border-white/5">
+                  <p className={`text-xl font-black uppercase ${infoCiclo.cor}`}>{infoCiclo.fase}</p>
+                  {infoCiclo.ovulacaoData && (
+                     <p className={`text-[10px] font-black uppercase mt-3 ${textMuted}`}>Data provável da Ovulação: {infoCiclo.ovulacaoData}</p>
+                  )}
                </div>
+
                <form onSubmit={salvarCiclo} className="space-y-4">
+                  <div className="bg-pink-500/10 p-4 rounded-2xl mb-4 border border-pink-500/20">
+                     <p className="text-[9px] font-bold text-pink-500 italic leading-relaxed">
+                        * O 1º dia é o início do sangramento intenso. A ovulação ocorre ~14 dias ANTES do próximo ciclo.
+                     </p>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Última Menstruação</label>
-                      <input type="date" value={ciclo.data_inicio} onChange={e => setCiclo({...ciclo, data_inicio: e.target.value})} className={`w-full p-3 rounded-xl border outline-none font-bold text-xs ${inputClass}`} />
+                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Dia 1 (Última Menstruação)</label>
+                      <input type="date" value={ciclo.data_inicio} onChange={e => setCiclo({...ciclo, data_inicio: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} />
                     </div>
                     <div>
-                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Duração do Ciclo</label>
-                      <input type="number" placeholder="Ex: 28" value={ciclo.duracao} onChange={e => setCiclo({...ciclo, duracao: e.target.value})} className={`w-full p-3 rounded-xl border outline-none font-bold text-xs ${inputClass}`} />
+                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Duração Média (Ex: 28)</label>
+                      <input type="number" placeholder="28" value={ciclo.duracao} onChange={e => setCiclo({...ciclo, duracao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} />
                     </div>
                   </div>
-                  <button type="submit" className="w-full bg-pink-500 text-white py-4 rounded-xl font-black text-xs uppercase shadow-lg active:scale-95 transition-transform">Salvar Dados de Saúde</button>
+                  <button type="submit" className="w-full bg-pink-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95 transition-transform mt-2">Calcular e Salvar Ciclo</button>
                </form>
             </div>
+
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Histórico de Gastos Pessoais</h3>
+            {lancamentos.filter(i => i.escopo === 'brenda').map(i => (
+                <div key={i.id} className={`p-4 rounded-[1.5rem] border flex justify-between items-center ${bgCard}`}>
+                  <p className="font-bold text-sm">{i.descricao}</p>
+                  <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
+                </div>
+            ))}
           </div>
         )}
 
-        {/* CONFIGURAÇÕES */}
+        {/* CONFIGURAÇÕES DE PONTO ZERO E INÍCIO */}
         {aba === 'CONFIG' && (
           <div className={`p-8 rounded-[3rem] border space-y-6 ${bgCard}`}>
-            <h2 className="font-black text-xl italic uppercase">Configurações Base</h2>
+            <h2 className="font-black text-2xl italic uppercase text-purple-500 mb-8">Ponto de Partida</h2>
+            
+            <div className="bg-purple-500/10 p-4 rounded-2xl border border-purple-500/20">
+               <p className="text-[10px] font-bold text-purple-400 italic leading-relaxed">
+                  Defina a data exata que vocês começaram a usar o App e quanto dinheiro havia na conta bancária geral neste dia.
+               </p>
+            </div>
+
             <div>
-              <label className={`text-[10px] font-black uppercase block mb-2 ${textMuted}`}>Seu Ponto Zero</label>
+              <label className={`text-[9px] font-black uppercase block mb-2 ${textMuted}`}>Data de Início do App</label>
+              <input type="date" value={config.data_inicio} onChange={e => setConfig({...config, data_inicio: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-lg ${inputClass}`} />
+            </div>
+            <div>
+              <label className={`text-[9px] font-black uppercase block mb-2 ${textMuted}`}>Saldo no Banco (Ponto Zero)</label>
               <input type="number" value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xl ${inputClass}`} />
             </div>
-            <button onClick={async () => await supabase.from('configuracoes').upsert({id: 1, ...config})} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95">💾 Salvar Alterações</button>
+            <button onClick={async () => {
+              await supabase.from('configuracoes').upsert({id: 1, ...config});
+              alert("Marco Zero configurado!");
+            }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase shadow-xl active:scale-95 mt-4">💾 Salvar Ponto Zero</button>
           </div>
         )}
       </main>
 
-      {/* BOTÃO + FLUTUANTE */}
-      <button onClick={() => setShowModal(true)} className="fixed bottom-10 left-1/2 -translate-x-1/2 w-16 h-16 bg-purple-600 text-white rounded-full shadow-[0_10px_30px_rgba(147,51,234,0.5)] flex items-center justify-center text-3xl font-bold z-40 active:scale-90 transition-transform">
+      {/* BOTÃO DE LANÇAMENTO */}
+      <button onClick={() => setShowModal(true)} className="fixed bottom-8 left-1/2 -translate-x-1/2 w-16 h-16 bg-gradient-to-tr from-purple-700 to-purple-500 text-white rounded-full shadow-[0_10px_40px_rgba(147,51,234,0.6)] flex items-center justify-center text-3xl font-bold z-40 active:scale-90 transition-transform">
         +
       </button>
 
-      {/* MODAL DE LANÇAMENTO (BLINDADO) */}
+      {/* MODAL DE LANÇAMENTO COMPLETO */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-md">
           <div className={`w-full max-w-sm p-8 rounded-[3rem] border shadow-2xl ${isDark ? 'bg-[#121418] border-white/10' : 'bg-white border-slate-200'}`}>
             <div className="flex justify-between items-center mb-6">
-              <h3 className="font-black text-lg italic uppercase">Lançamento</h3>
+              <h3 className="font-black text-xl italic uppercase">Lançamento</h3>
               <button onClick={() => setShowModal(false)} className={`text-2xl ${textMuted}`}>✕</button>
             </div>
             
             <form onSubmit={salvarGasto} className="space-y-4">
+              
               <div>
-                <label className={`text-[9px] font-black uppercase block mb-1 ${textMuted}`}>Onde este gasto vai entrar?</label>
                 <select value={form.escopo} onChange={e => setForm({...form, escopo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[11px] font-black uppercase ${inputClass}`}>
-                   <option value="casal">🌍 Conta do Casal</option>
-                   <option value="celio">💼 Pessoal Célio</option>
-                   <option value="brenda">🌸 Pessoal Brenda</option>
+                   <option value="casal">🌍 Conta Central do Casal</option>
+                   <option value="celio">💼 Carteira Pessoal - Célio</option>
+                   <option value="brenda">🌸 Carteira Pessoal - Brenda</option>
                 </select>
               </div>
 
               {form.escopo === 'casal' && (
                 <div className={`flex gap-2 p-1 rounded-2xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
                   {['Célio', 'Brenda'].map(u => (
-                    <button key={u} type="button" onClick={() => setForm({...form, usuario: u})} className={`flex-1 py-3 rounded-xl text-[10px] font-black transition-all ${form.usuario === u ? (isDark ? 'bg-white text-black' : 'bg-slate-800 text-white') : textMuted}`}>{u.toUpperCase()}</button>
+                    <button key={u} type="button" onClick={() => setForm({...form, usuario: u})} className={`flex-1 py-3 rounded-xl text-[10px] font-black transition-all ${form.usuario === u ? (isDark ? 'bg-white text-black shadow-md' : 'bg-slate-800 text-white shadow-md') : textMuted}`}>{u.toUpperCase()}</button>
                   ))}
                 </div>
               )}
 
-              <input type="text" placeholder="O que foi?" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold ${inputClass}`} />
+              <input type="text" placeholder="O que foi? (Ex: Aluguel, Supermercado)" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold ${inputClass}`} required />
               
               <div className="grid grid-cols-2 gap-3">
-                 <input type="number" placeholder="R$ 0,00" value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-black text-xl ${inputClass}`} />
+                 <input type="number" placeholder="R$ 0,00" value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-black text-xl ${inputClass}`} required />
                  <select value={form.tipo} onChange={e => setForm({...form, tipo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
                     <option value="despesa">💸 Saída</option>
                     <option value="entrada">💰 Entrada</option>
                  </select>
               </div>
               
-              <select value={form.forma} onChange={e => setForm({...form, forma: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
-                 <option value="À Vista">💵 À Vista</option>
-                 <option value="Cartão de Crédito">💳 Cartão de Crédito</option>
-              </select>
+              <div className="grid grid-cols-2 gap-3">
+                 <select value={form.forma} onChange={e => setForm({...form, forma: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[9px] font-black uppercase ${inputClass}`}>
+                    <option value="À Vista">💵 À Vista</option>
+                    <option value="Cartão de Crédito">💳 Crédito</option>
+                 </select>
+                 
+                 {/* NOVO: Fixo vs Variável */}
+                 <select value={form.previsibilidade} onChange={e => setForm({...form, previsibilidade: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[9px] font-black uppercase ${inputClass}`}>
+                    <option value="Variável">🍔 Variável (Lazer, iFood)</option>
+                    <option value="Fixa">🏠 Fixo (Conta, Renda)</option>
+                 </select>
+              </div>
               
-              <button type="submit" className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95 transition-all">
-                Gravar Lançamento
+              <button type="submit" className="w-full bg-purple-600 text-white py-5 rounded-2xl font-black text-[11px] uppercase mt-2 shadow-xl active:scale-95 transition-all">
+                Lançar no Sistema
               </button>
             </form>
           </div>
