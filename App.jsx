@@ -13,7 +13,6 @@ function App() {
     const salvo = localStorage.getItem('@financasCB:lancamentos'); return salvo ? JSON.parse(salvo) : [];
   });
   
-  // NOVO: Estado para guardar os Contratos Fixos
   const [contratos, setContratos] = useState(() => {
     const salvo = localStorage.getItem('@financasCB:contratos'); return salvo ? JSON.parse(salvo) : [];
   });
@@ -32,7 +31,6 @@ function App() {
   const dataHoje = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável', data: dataHoje });
   
-  // Formulário separado para criar Contas Fixas
   const [formContrato, setFormContrato] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', escopo: 'casal', data_inicio: dataHoje });
 
   const [salvandoFoto, setSalvandoFoto] = useState(false);
@@ -110,7 +108,7 @@ function App() {
   };
 
   const iniciarEdicao = (entry) => {
-    if (entry.isVirtual) return alert("Ispe é uma Conta Fixa. Para editá-la, vá no menu 'Contas Fixas'.");
+    if (entry.isVirtual) return alert("Esta é uma Conta Fixa. Para editá-la, vá no menu 'Contas Fixas'.");
     setEditingEntryId(entry.id);
     setForm({
       descricao: entry.descricao, valor: String(entry.valor).replace('.', ','),
@@ -134,8 +132,10 @@ function App() {
   };
 
   const salvarCiclo = async (e) => {
-    e.preventDefault(); await supabase.from('ciclo_brenda').upsert({ id: 1, ...ciclo });
-    alert("Ciclo salvo!"); carregarDados();
+    e.preventDefault(); 
+    await supabase.from('ciclo_brenda').upsert({ id: 1, ...ciclo });
+    alert("Dados do ciclo sincronizados com sucesso!"); 
+    carregarDados();
   };
 
   // --- MOTOR MATEMÁTICO DO TEMPO E RECORRÊNCIA ---
@@ -144,32 +144,28 @@ function App() {
   const nomeMeses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
   const nomeMesAtual = `${nomeMeses[dataFiltro.getMonth()]} ${dataFiltro.getFullYear()}`;
 
-  // Função central: Quantos meses essa conta fixa está ativa até o mês visualizado?
   const calcularMesesAtivos = (dataInicioStr) => {
     if (!dataInicioStr) return 0;
     const inicio = new Date(dataInicioStr + 'T00:00:00');
     const filtro = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0); 
-    if (inicio > filtro) return 0; // Ainda não começou
+    if (inicio > filtro) return 0;
     const anos = filtro.getFullYear() - inicio.getFullYear();
     const meses = filtro.getMonth() - inicio.getMonth();
     return (anos * 12) + meses + 1;
   };
 
-  // 1. Lançamentos Manuais
   const lancamentosDoMes = lancamentos.filter(i => (i.data_lancamento || '').startsWith(mesAnoFiltro));
   const lancamentosAcumulados = lancamentos.filter(i => (i.data_lancamento || '') <= ultimoDiaDoMesVisualizado);
 
-  // 2. Geração de "Lançamentos Virtuais" (As contas fixas que aparecem no extrato)
   const contratosVirtuais = contratos.filter(c => calcularMesesAtivos(c.data_inicio) > 0).map(c => ({
      ...c,
      id: 'virtual-' + c.id,
-     isVirtual: true, // Tag para sabermos que não pode editar aqui
+     isVirtual: true, 
      data_lancamento: `${mesAnoFiltro}-01`,
      forma_pagamento: 'Débito Recorrente',
      previsibilidade: 'Fixa'
   }));
 
-  // Mistura os avulsos com os virtuais para criar o Extrato Perfeito
   const extratoCasalMes = [...lancamentosDoMes.filter(i => i.escopo === 'casal'), ...contratosVirtuais.filter(i => i.escopo === 'casal')]
      .sort((a,b) => new Date(b.data_lancamento) - new Date(a.data_lancamento));
      
@@ -179,12 +175,10 @@ function App() {
   const extratoBrendaMes = [...lancamentosDoMes.filter(i => i.escopo === 'brenda'), ...contratosVirtuais.filter(i => i.escopo === 'brenda')]
      .sort((a,b) => new Date(b.data_lancamento) - new Date(a.data_lancamento));
 
-  // 3. O Cálculo do Acumulado (Efeito Cascata com Contratos)
   const calcularSaldoAcumulado = (escopo) => {
      const avulsos = lancamentosAcumulados.filter(i => i.escopo === escopo);
      let saldo = avulsos.reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
      
-     // Adiciona o peso de cada contrato multiplicando pelos meses ativos
      contratos.filter(c => c.escopo === escopo).forEach(c => {
         const meses = calcularMesesAtivos(c.data_inicio);
         if (meses > 0) {
@@ -198,11 +192,10 @@ function App() {
   const saldoCelio = calcularSaldoAcumulado('celio');
   const saldoBrenda = calcularSaldoAcumulado('brenda');
 
-  // Valores do Mês (Para os cards)
   const despesasFixasMes = extratoCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Fixa').reduce((acc, i) => acc + Number(i.valor), 0);
   const despesasVariaveisMes = extratoCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Variável').reduce((acc, i) => acc + Number(i.valor), 0);
 
-  // Motor do Ciclo
+  // MOTOR DO CICLO (COM LÓGICA DO DRAUZIO VARELLA)
   let infoCiclo = { fase: "Aguardando dados...", cor: "text-gray-400", diasProxima: 0, ovulacaoData: '' };
   if (ciclo.data_inicio) {
     const hoje = new Date(); hoje.setHours(0,0,0,0);
@@ -325,6 +318,7 @@ function App() {
                <h2 className="font-black text-2xl uppercase italic">Caixa Pessoal Célio</h2>
                <h1 className="text-4xl font-black mt-4">R$ {saldoCelio.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
             {extratoCelioMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <div>
@@ -347,6 +341,37 @@ function App() {
                <h2 className="font-black text-2xl uppercase italic">Caixa Pessoal Brenda</h2>
                <h1 className="text-4xl font-black mt-4">R$ {saldoBrenda.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
+            
+            {/* O MOTOR DO CICLO RESTAURADO */}
+            <div className={`p-6 rounded-[2rem] border ${bgCard}`}>
+               <h3 className="font-black text-xl text-pink-500 italic uppercase mb-6 flex justify-between items-center">
+                  <span>🌸 Saúde Íntima</span>
+                  <span className="text-[10px] bg-pink-500/20 px-3 py-1 rounded-full font-black">
+                    {infoCiclo.diasProxima > 0 ? `${infoCiclo.diasProxima} DIAS P/ PRÓXIMA` : 'ATRASADO'}
+                  </span>
+               </h3>
+               <div className="mb-6 text-center bg-black/5 p-5 rounded-3xl border border-white/5">
+                  <p className={`text-xl font-black uppercase ${infoCiclo.cor}`}>{infoCiclo.fase}</p>
+                  {infoCiclo.ovulacaoData && (
+                     <p className={`text-[10px] font-black uppercase mt-3 ${textMuted}`}>Data provável da Ovulação: {infoCiclo.ovulacaoData}</p>
+                  )}
+               </div>
+               <form onSubmit={salvarCiclo} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Dia 1 (Sangramento)</label>
+                      <input type="date" value={ciclo.data_inicio} onChange={e => setCiclo({...ciclo, data_inicio: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} />
+                    </div>
+                    <div>
+                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Duração Média</label>
+                      <input type="number" placeholder="28" value={ciclo.duracao} onChange={e => setCiclo({...ciclo, duracao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} />
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full bg-pink-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95 transition-transform mt-2">Calcular Ciclo</button>
+               </form>
+            </div>
+            
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
             {extratoBrendaMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <div>
@@ -362,7 +387,7 @@ function App() {
           </div>
         )}
 
-        {/* NOVA ABA: CONTRATOS E ASSINATURAS */}
+        {/* CONTRATOS FIXOS */}
         {aba === 'CONTRATOS' && (
           <div className="animate-in fade-in duration-500 space-y-6">
             <div className="bg-yellow-600 text-white p-8 rounded-[3rem] shadow-xl mb-8">
