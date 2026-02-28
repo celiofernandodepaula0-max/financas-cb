@@ -11,7 +11,6 @@ function App() {
   const [ciclo, setCiclo] = useState({ data_inicio: '', duracao: 28, idade: '', fatores: '' });
   
   const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal' });
-  
   const [fotoUrl, setFotoUrl] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -89,11 +88,12 @@ function App() {
   const bgMenu = isDark ? 'bg-[#121418] border-r border-white/5' : 'bg-white border-r border-slate-200 shadow-2xl';
   const bgCard = isDark ? 'bg-white/[0.03] border-white/5' : 'bg-white border-slate-200 shadow-sm';
   const textMuted = isDark ? 'opacity-40' : 'text-slate-500';
-  const inputClass = isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-900';
+  const inputClass = isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-300 text-slate-900';
 
   return (
     <div className={`min-h-screen ${bgBody} ${textBody} font-sans overflow-x-hidden transition-colors duration-300`}>
       
+      {/* MENU LATERAL */}
       <div className={`fixed inset-y-0 left-0 w-72 ${bgMenu} z-50 transform ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-500 p-8`}>
         <div className="flex justify-between items-center mb-10">
           <h2 className="font-black italic text-xl">MENU</h2>
@@ -104,13 +104,13 @@ function App() {
           <button onClick={() => {setAba('CELIO'); setIsMenuOpen(false)}} className="block w-full text-left py-3 font-bold border-b border-gray-500/20 italic text-blue-500">💼 Espaço Célio</button>
           <button onClick={() => {setAba('BRENDA'); setIsMenuOpen(false)}} className="block w-full text-left py-3 font-bold border-b border-gray-500/20 italic text-pink-500">🌸 Espaço Brenda</button>
           <button onClick={() => {setAba('CONFIG'); setIsMenuOpen(false)}} className="block w-full text-left py-3 font-bold border-b border-gray-500/20 italic">⚙️ Configurações</button>
-          
           <button onClick={alternarTema} className="mt-8 flex items-center gap-2 font-black text-xs uppercase tracking-widest text-purple-500">
             {isDark ? '☀️ Mudar para Claro' : '🌙 Mudar para Escuro'}
           </button>
         </div>
       </div>
 
+      {/* HEADER */}
       <header className="p-6 flex justify-between items-center max-w-md mx-auto">
         <button onClick={() => setIsMenuOpen(true)} className={`text-2xl p-2 rounded-xl ${isDark ? 'bg-white/5' : 'bg-slate-200'}`}>☰</button>
         <div className="text-right">
@@ -126,6 +126,7 @@ function App() {
         </div>
       </header>
 
+      {/* DASHBOARD */}
       <main className="max-w-md mx-auto px-6 pb-32">
         {aba === 'DASHBOARD' && (
           <div className="animate-in fade-in duration-500">
@@ -153,11 +154,11 @@ function App() {
           </div>
         )}
 
+        {/* ESPAÇO CÉLIO */}
         {aba === 'CELIO' && (
           <div className="animate-in fade-in duration-500 space-y-6">
             <div className="bg-blue-600 text-white p-8 rounded-[3rem] shadow-xl text-center">
                <h2 className="font-black text-2xl uppercase italic">Gasto Pessoal Célio</h2>
-               <p className="text-xs opacity-70 mt-2">Valores aqui não afetam o painel do casal.</p>
                <h1 className="text-4xl font-black mt-4">R$ {saldoCelio.toLocaleString('pt-BR')}</h1>
             </div>
             {gastosCelio.map(i => (
@@ -169,11 +170,11 @@ function App() {
           </div>
         )}
 
+        {/* ESPAÇO BRENDA */}
         {aba === 'BRENDA' && (
           <div className="animate-in fade-in duration-500 space-y-8">
             <div className="bg-pink-600 text-white p-8 rounded-[3rem] shadow-xl text-center">
                <h2 className="font-black text-2xl uppercase italic">Gasto Pessoal Brenda</h2>
-               <p className="text-xs opacity-70 mt-2">Carteira privada (não afeta o painel geral).</p>
                <h1 className="text-4xl font-black mt-4">R$ {saldoBrenda.toLocaleString('pt-BR')}</h1>
             </div>
             
@@ -182,12 +183,10 @@ function App() {
                   <span>🌸 Ciclo Menstrual</span>
                   <span className="text-[10px] bg-pink-500/20 px-3 py-1 rounded-full">{diasParaProxima} dias para a próxima</span>
                </h3>
-               
                <div className="mb-8 text-center bg-black/5 p-4 rounded-2xl">
                   <p className={`text-2xl font-black uppercase ${corFase}`}>{faseAtual}</p>
                   <p className={`text-[10px] font-black uppercase mt-1 ${textMuted}`}>Fase Atual do Ciclo</p>
                </div>
-
                <form onSubmit={salvarCiclo} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -199,34 +198,13 @@ function App() {
                       <input type="number" placeholder="Ex: 28" value={ciclo.duracao} onChange={e => setCiclo({...ciclo, duracao: e.target.value})} className={`w-full p-3 rounded-xl border outline-none font-bold text-xs ${inputClass}`} />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Idade</label>
-                      <input type="number" value={ciclo.idade} onChange={e => setCiclo({...ciclo, idade: e.target.value})} className={`w-full p-3 rounded-xl border outline-none font-bold text-xs ${inputClass}`} />
-                    </div>
-                    <div>
-                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Fatores Externos</label>
-                      <select value={ciclo.fatores} onChange={e => setCiclo({...ciclo, fatores: e.target.value})} className={`w-full p-3 rounded-xl border outline-none font-bold text-[10px] uppercase ${inputClass}`}>
-                         <option value="">Nenhum</option>
-                         <option value="Estresse">Ansiedade/Estresse</option>
-                         <option value="Anticoncepcional">Anticoncepcional</option>
-                      </select>
-                    </div>
-                  </div>
                   <button type="submit" className="w-full bg-pink-500 text-white py-4 rounded-xl font-black text-xs uppercase shadow-lg active:scale-95 transition-transform">Salvar Dados de Saúde</button>
                </form>
             </div>
-            
-            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato Privado</h3>
-            {gastosBrenda.map(i => (
-                <div key={i.id} className={`p-4 rounded-[1.5rem] border flex justify-between items-center ${bgCard}`}>
-                  <p className="font-bold text-sm">{i.descricao}</p>
-                  <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
-                </div>
-            ))}
           </div>
         )}
 
+        {/* CONFIGURAÇÕES */}
         {aba === 'CONFIG' && (
           <div className={`p-8 rounded-[3rem] border space-y-6 ${bgCard}`}>
             <h2 className="font-black text-xl italic uppercase">Configurações Base</h2>
@@ -239,10 +217,12 @@ function App() {
         )}
       </main>
 
+      {/* BOTÃO + FLUTUANTE */}
       <button onClick={() => setShowModal(true)} className="fixed bottom-10 left-1/2 -translate-x-1/2 w-16 h-16 bg-purple-600 text-white rounded-full shadow-[0_10px_30px_rgba(147,51,234,0.5)] flex items-center justify-center text-3xl font-bold z-40 active:scale-90 transition-transform">
         +
       </button>
 
+      {/* MODAL DE LANÇAMENTO (BLINDADO) */}
       {showModal && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className={`w-full max-w-sm p-8 rounded-[3rem] border shadow-2xl ${isDark ? 'bg-[#121418] border-white/10' : 'bg-white border-slate-200'}`}>
@@ -252,11 +232,10 @@ function App() {
             </div>
             
             <form onSubmit={salvarGasto} className="space-y-4">
-              
               <div>
                 <label className={`text-[9px] font-black uppercase block mb-1 ${textMuted}`}>Onde este gasto vai entrar?</label>
                 <select value={form.escopo} onChange={e => setForm({...form, escopo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[11px] font-black uppercase ${inputClass}`}>
-                   <option value="casal">🌍 Conta do Casal (Geral)</option>
+                   <option value="casal">🌍 Conta do Casal</option>
                    <option value="celio">💼 Pessoal Célio</option>
                    <option value="brenda">🌸 Pessoal Brenda</option>
                 </select>
@@ -273,3 +252,27 @@ function App() {
               <input type="text" placeholder="O que foi?" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold ${inputClass}`} />
               
               <div className="grid grid-cols-2 gap-3">
+                 <input type="number" placeholder="R$ 0,00" value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-black text-xl ${inputClass}`} />
+                 <select value={form.tipo} onChange={e => setForm({...form, tipo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
+                    <option value="despesa">💸 Saída</option>
+                    <option value="entrada">💰 Entrada</option>
+                 </select>
+              </div>
+              
+              <select value={form.forma} onChange={e => setForm({...form, forma: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
+                 <option value="À Vista">💵 À Vista</option>
+                 <option value="Cartão de Crédito">💳 Cartão de Crédito</option>
+              </select>
+              
+              <button type="submit" className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95 transition-all">
+                Gravar Lançamento
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;
