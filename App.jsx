@@ -5,17 +5,17 @@ function App() {
   const [aba, setAba] = useState('DASHBOARD');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const [tema, setTema] = useState('dark');
+  
+  // O SEGREDO DA VELOCIDADE: O app agora lê a memória do celular primeiro (Zero Delay)
+  const [tema, setTema] = useState(() => localStorage.getItem('@financasCB:tema') || 'dark');
+  const [fotoUrl, setFotoUrl] = useState(() => localStorage.getItem('@financasCB:foto') || null);
+  
   const [lancamentos, setLancamentos] = useState([]);
   const [config, setConfig] = useState({ saldo_inicial: 0, data_inicio: '' });
   const [ciclo, setCiclo] = useState({ data_inicio: '', duracao: 28 });
   
-  // ESTADO DE EDIÇÃO (CRUCIAL): Guarda o ID do lançamento sendo editado
   const [editingEntryId, setEditingEntryId] = useState(null);
-  
-  // Novo formulário com 'previsibilidade' (Fixo/Variável)
   const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável' });
-  const [fotoUrl, setFotoUrl] = useState(null);
   const [salvandoFoto, setSalvandoFoto] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -25,11 +25,20 @@ function App() {
     const { data: cb } = await supabase.from('ciclo_brenda').select('*').maybeSingle();
     
     if (f) setLancamentos(f);
-    if (c) { setConfig(c); setTema(c.tema || 'dark'); }
+    if (c) { 
+      setConfig(c); 
+      const temaBanco = c.tema || 'dark';
+      setTema(temaBanco); 
+      localStorage.setItem('@financasCB:tema', temaBanco); // Salva o tema no celular
+    }
     if (cb) setCiclo(cb);
     
     const { data: img } = supabase.storage.from('perfis').getPublicUrl('casal.png');
-    if (img) setFotoUrl(`${img.publicUrl}?t=${new Date().getTime()}`);
+    if (img) {
+      const urlComCache = `${img.publicUrl}?t=${new Date().getTime()}`;
+      setFotoUrl(urlComCache);
+      localStorage.setItem('@financasCB:foto', urlComCache); // Salva a foto no celular
+    }
   };
 
   useEffect(() => { carregarDados(); }, []);
@@ -37,6 +46,7 @@ function App() {
   const alternarTema = async () => {
     const novoTema = tema === 'dark' ? 'light' : 'dark';
     setTema(novoTema);
+    localStorage.setItem('@financasCB:tema', novoTema); // Já muda instantaneamente no celular
     await supabase.from('configuracoes').upsert({ id: 1, tema: novoTema });
   };
 
@@ -49,7 +59,7 @@ function App() {
     
     setSalvandoFoto(false);
     if (error) {
-      alert("Erro ao salvar foto. Verifique se você executou a SQL de permissões (UPDATE/DELETE) no Supabase. Erro: " + error.message);
+      alert("Erro ao salvar foto: " + error.message);
     } else {
       carregarDados();
     }
@@ -59,85 +69,56 @@ function App() {
     e.preventDefault();
     const v = parseFloat(String(form.valor).replace(',', '.'));
     
-    // Constrói o objeto de dados final
     const dadosParaSalvar = { 
-      descricao: form.descricao, 
-      valor: v, 
-      tipo: form.tipo, 
-      usuario: form.usuario, 
-      forma_pagamento: form.forma, 
-      escopo: form.escopo, 
-      previsibilidade: form.previsibilidade,
+      descricao: form.descricao, valor: v, tipo: form.tipo, 
+      usuario: form.usuario, forma_pagamento: form.forma, 
+      escopo: form.escopo, previsibilidade: form.previsibilidade,
       mes: new Intl.DateTimeFormat('pt-BR', {month: 'long'}).format(new Date()) 
     };
 
     if (editingEntryId) {
-      // SE TEM ID, É EDIÇÃO
-      const { error } = await supabase.from('fluxo').update(dadosParaSalvar).eq('id', editingEntryId);
-      if (error) {
-        alert("Erro ao atualizar lançamento. Verifique se você executou a SQL de permissões (UPDATE) no Supabase. Erro: " + error.message);
-      } else {
-        alert("Lançamento atualizado com sucesso!");
-      }
+      await supabase.from('fluxo').update(dadosParaSalvar).eq('id', editingEntryId);
     } else {
-      // SE NÃO TEM ID, É NOVO LANÇAMENTO
-      const { error } = await supabase.from('fluxo').insert([dadosParaSalvar]);
-      if (error) {
-        alert("Erro ao inserir lançamento. Erro: " + error.message);
-      } else {
-        alert("Lançamento inserido com sucesso!");
-      }
+      await supabase.from('fluxo').insert([dadosParaSalvar]);
     }
 
     fecharModal();
     carregarDados();
   };
 
-  // Função para abrir o modal para editar um item existente
   const iniciarEdicao = (entry) => {
     setEditingEntryId(entry.id);
     setForm({
-      descricao: entry.descricao,
-      valor: String(entry.valor).replace('.', ','),
-      tipo: entry.tipo,
-      usuario: entry.usuario,
-      forma: entry.forma_pagamento,
-      escopo: entry.escopo,
-      previsibilidade: entry.previsibilidade
+      descricao: entry.descricao, valor: String(entry.valor).replace('.', ','),
+      tipo: entry.tipo, usuario: entry.usuario, forma: entry.forma_pagamento,
+      escopo: entry.escopo, previsibilidade: entry.previsibilidade
     });
     setShowModal(true);
   };
 
   const fecharModal = () => {
     setShowModal(false);
-    setEditingEntryId(null); // Reseta o estado de edição
-    setForm({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável' }); // Limpa o formulário
+    setEditingEntryId(null);
+    setForm({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável' });
   };
 
-  // Função para APAGAR o lançamento (CRUCIAL)
   const apagarLancamento = async () => {
     if (!editingEntryId) return;
-    if (confirm("Tem certeza que deseja APAGAR este lançamento para sempre? Não há volta!")) {
-      const { error } = await supabase.from('fluxo').delete().eq('id', editingEntryId);
-      
-      if (error) {
-        alert("Erro ao apagar lançamento. Verifique as permissões (DELETE) no Supabase. Erro: " + error.message);
-      } else {
-        alert("Lançamento apagado definitivamente.");
-        fecharModal();
-        carregarDados();
-      }
+    if (confirm("Tem certeza que deseja APAGAR este lançamento para sempre?")) {
+      await supabase.from('fluxo').delete().eq('id', editingEntryId);
+      fecharModal();
+      carregarDados();
     }
   };
 
   const salvarCiclo = async (e) => {
     e.preventDefault();
     await supabase.from('ciclo_brenda').upsert({ id: 1, ...ciclo });
-    alert("Dados do ciclo sincronizados com sucesso!");
+    alert("Dados do ciclo sincronizados!");
     carregarDados();
   };
 
-  // FILTROS FINANCEIROS (CASAL)
+  // FILTROS
   const gastosCasal = lancamentos.filter(i => i.escopo === 'casal');
   const entradasCasal = gastosCasal.filter(i => i.tipo === 'entrada');
   const despesasCasal = gastosCasal.filter(i => i.tipo === 'despesa');
@@ -146,14 +127,12 @@ function App() {
   const despesasVariaveis = despesasCasal.filter(i => i.previsibilidade === 'Variável').reduce((acc, i) => acc + Number(i.valor), 0);
   
   const totalEntradasCasal = entradasCasal.reduce((acc, i) => acc + Number(i.valor), 0);
-  const totalGastosCasal = despesasFixas + despesasVariaveis;
-  const saldoAtualCasal = Number(config.saldo_inicial) + totalEntradasCasal - totalGastosCasal;
+  const saldoAtualCasal = Number(config.saldo_inicial) + totalEntradasCasal - (despesasFixas + despesasVariaveis);
 
-  // FILTROS PESSOAIS
   const saldoCelio = lancamentos.filter(i => i.escopo === 'celio').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
   const saldoBrenda = lancamentos.filter(i => i.escopo === 'brenda').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
 
-  // MOTOR DO CICLO MENSTRUAL
+  // MOTOR DO CICLO
   let infoCiclo = { fase: "Aguardando dados...", cor: "text-gray-400", diasProxima: 0, ovulacaoData: '' };
   
   if (ciclo.data_inicio) {
@@ -186,7 +165,7 @@ function App() {
     } else if (diaDoCicloAtual > 5 && hoje < inicioFertil) {
       infoCiclo.fase = "🌱 Fase Folicular"; infoCiclo.cor = "text-pink-400";
     } else {
-      infoCiclo.fase = "🔄 Ciclo Atrasado/Nova Contagem"; infoCiclo.cor = "text-orange-500";
+      infoCiclo.fase = "🔄 Ciclo Atrasado"; infoCiclo.cor = "text-orange-500";
       infoCiclo.diasProxima = 0;
     }
   }
@@ -202,7 +181,6 @@ function App() {
   return (
     <div className={`min-h-screen ${bgBody} ${textBody} font-sans overflow-x-hidden transition-colors duration-300`}>
       
-      {/* MENU LATERAL */}
       <div className={`fixed inset-y-0 left-0 w-72 ${bgMenu} z-50 transform ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-500 p-8`}>
         <div className="flex justify-between items-center mb-10">
           <h2 className="font-black italic text-xl">MENU</h2>
@@ -219,7 +197,6 @@ function App() {
         </div>
       </div>
 
-      {/* HEADER E FOTO DE PERFIL */}
       <header className="p-6 flex justify-between items-center max-w-md mx-auto">
         <button onClick={() => setIsMenuOpen(true)} className={`text-2xl p-2 rounded-xl ${isDark ? 'bg-white/5' : 'bg-slate-200'}`}>☰</button>
         <div className="text-right">
@@ -228,12 +205,11 @@ function App() {
         </div>
         
         <div onClick={() => !salvandoFoto && fileInputRef.current.click()} className={`w-12 h-12 rounded-full border-2 border-purple-600 overflow-hidden cursor-pointer shadow-lg relative flex items-center justify-center ${salvandoFoto ? 'animate-pulse bg-purple-900' : ''}`}>
-           {salvandoFoto ? <span className="text-[8px] font-black">⚙️</span> : <img src={fotoUrl || 'https://via.placeholder.com/150'} className="w-full h-full object-cover" />}
+           {salvandoFoto ? <span className="text-[8px] font-black">⚙️</span> : <img src={fotoUrl || 'https://via.placeholder.com/150'} className="w-full h-full object-cover bg-slate-800" />}
            <input type="file" accept="image/*" ref={fileInputRef} onChange={subirFoto} className="hidden" />
         </div>
       </header>
 
-      {/* DASHBOARD */}
       <main className="max-w-md mx-auto px-6 pb-32">
         {aba === 'DASHBOARD' && (
           <div className="animate-in fade-in duration-500">
@@ -252,12 +228,23 @@ function App() {
               </div>
             </div>
 
-            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Últimos Lançamentos (Toque para Editar)</h3>
+            <div className="grid grid-cols-2 gap-4 mb-8">
+               <div className={`p-5 rounded-[2rem] border ${bgCard}`}>
+                  <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Despesas Fixas</p>
+                  <p className="text-lg font-black text-red-500">R$ {despesasFixas.toFixed(2)}</p>
+               </div>
+               <div className={`p-5 rounded-[2rem] border ${bgCard}`}>
+                  <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Despesas Variáveis</p>
+                  <p className="text-lg font-black text-orange-400">R$ {despesasVariaveis.toFixed(2)}</p>
+               </div>
+            </div>
+
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Lançamentos (Toque para Editar)</h3>
             <div className="space-y-3">
-              {gastosCasal.slice(0, 10).map(i => (
+              {gastosCasal.slice(0, 15).map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer transition-all hover:border-purple-500/20 active:scale-[0.98] ${bgCard}`}>
                   <div className="flex items-center gap-4">
-                    <div className={`w-2 h-2 rounded-full ${i.tipo === 'entrada' ? 'bg-green-500 shadow-[0_0_8px_rgba(74,222,128,0.5)]' : (i.previsibilidade === 'Fixa' ? 'bg-red-600' : 'bg-orange-400')}`}></div>
+                    <div className={`w-2 h-2 rounded-full ${i.tipo === 'entrada' ? 'bg-green-500' : (i.previsibilidade === 'Fixa' ? 'bg-red-600' : 'bg-orange-400')}`}></div>
                     <div>
                       <p className="font-bold text-sm leading-none mb-1">{i.descricao}</p>
                       <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.usuario} • {i.previsibilidade} • {i.forma_pagamento}</p>
@@ -293,6 +280,7 @@ function App() {
                <h2 className="font-black text-2xl uppercase italic">Caixa Pessoal Brenda</h2>
                <h1 className="text-4xl font-black mt-4">R$ {saldoBrenda.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
+            
             <div className={`p-6 rounded-[2rem] border ${bgCard}`}>
                <h3 className="font-black text-xl text-pink-500 italic uppercase mb-6 flex justify-between items-center">
                   <span>🌸 Saúde Íntima</span>
@@ -313,13 +301,14 @@ function App() {
                       <input type="date" value={ciclo.data_inicio} onChange={e => setCiclo({...ciclo, data_inicio: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} />
                     </div>
                     <div>
-                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Duração Média (Ex: 28)</label>
+                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Duração Média</label>
                       <input type="number" placeholder="28" value={ciclo.duracao} onChange={e => setCiclo({...ciclo, duracao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} />
                     </div>
                   </div>
-                  <button type="submit" className="w-full bg-pink-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl">Calcular e Salvar Ciclo</button>
+                  <button type="submit" className="w-full bg-pink-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95 transition-transform mt-2">Calcular Ciclo</button>
                </form>
             </div>
+            
             {lancamentos.filter(i => i.escopo === 'brenda').map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <p className="font-bold text-sm">{i.descricao}</p>
@@ -343,30 +332,26 @@ function App() {
             <button onClick={async () => {
               await supabase.from('configuracoes').upsert({id: 1, ...config});
               alert("Marco Zero configurado!");
-            }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95">Salvar Marco Zero</button>
+            }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase shadow-xl active:scale-95 mt-4">💾 Salvar Ponto Zero</button>
           </div>
         )}
       </main>
 
-      {/* BOTÃO DE LANÇAMENTO */}
       <button onClick={() => setShowModal(true)} className="fixed bottom-8 left-1/2 -translate-x-1/2 w-16 h-16 bg-gradient-to-tr from-purple-700 to-purple-500 text-white rounded-full shadow-[0_10px_40px_rgba(147,51,234,0.6)] flex items-center justify-center text-3xl font-bold z-40 active:scale-90 transition-transform">
         +
       </button>
 
-      {/* MODAL DE LANÇAMENTO (INTELIGENTE: NOVO VS EDITAR) */}
       {showModal && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-md">
           <div className={`w-full max-w-sm p-8 rounded-[3rem] border shadow-2xl ${isDark ? 'bg-[#121418] border-white/10' : 'bg-white border-slate-200'}`}>
             <div className="flex justify-between items-center mb-6">
-              {/* TÍTULO DINÂMICO */}
               <h3 className="font-black text-xl italic uppercase">
-                {editingEntryId ? 'Editar Lançamento' : 'Novo Lançamento'}
+                {editingEntryId ? 'Editar Lançamento' : 'Lançamento'}
               </h3>
               <button onClick={fecharModal} className={`text-2xl ${textMuted}`}>✕</button>
             </div>
             
             <form onSubmit={salvarGasto} className="space-y-4">
-              
               <div>
                 <select value={form.escopo} onChange={e => setForm({...form, escopo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[11px] font-black uppercase ${inputClass}`}>
                    <option value="casal">🌍 Conta Central do Casal</option>
@@ -404,7 +389,6 @@ function App() {
                  </select>
               </div>
               
-              {/* BOTÕES DE AÇÃO: Salvar e (Se for Edição) Apagar */}
               <div className="flex gap-3 mt-6 pt-6 border-t border-gray-500/10">
                   {editingEntryId && (
                     <button type="button" onClick={apagarLancamento} className="flex-1 bg-gray-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase active:scale-95 transition-all">
