@@ -1,0 +1,15 @@
+{
+  "short_name": "Finanças CB",
+  "name": "App Finanças Célio & Brenda",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3135/3135679.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#0a0b0e",
+  "background_color": "#0a0b0e"
+}
