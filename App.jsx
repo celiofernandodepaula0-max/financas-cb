@@ -1,109 +1,162 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 
 function App() {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [tema, setTema] = useState('dark');
   const [aba, setAba] = useState('DASHBOARD');
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [tema, setTema] = useState('dark');
   const [lancamentos, setLancamentos] = useState([]);
-  const [metas, setMetas] = useState([]);
-  const [config, setConfig] = useState({ saldo_inicial: 0 });
-  const [form, setForm] = useState({ titulo: '', valor: '', data: '', tipo: 'despesa' });
+  const [config, setConfig] = useState({ saldo_inicial: 0, renda_fixa: 0 });
+  const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista' });
+  const [fotoUrl, setFotoUrl] = useState(null);
+  const fileInputRef = useRef(null);
 
-  const carregarTudo = async () => {
+  const carregarDados = async () => {
     const { data: f } = await supabase.from('fluxo').select('*').order('created_at', { ascending: false });
-    const { data: m } = await supabase.from('planejamentos').select('*');
     const { data: c } = await supabase.from('configuracoes').select('*').single();
     if (f) setLancamentos(f);
-    if (m) setMetas(m);
-    if (c) { setConfig(c); setTema(c.tema); }
+    if (c) setConfig(c);
+    
+    const { data: img } = supabase.storage.from('perfis').getPublicUrl('casal.png');
+    if (img) setFotoUrl(`${img.publicUrl}?t=${new Date().getTime()}`);
   };
 
-  useEffect(() => { carregarTudo(); }, []);
+  useEffect(() => { carregarDados(); }, []);
+
+  const salvar = async (e) => {
+    e.preventDefault();
+    const v = parseFloat(String(form.valor).replace(',', '.'));
+    await supabase.from('fluxo').insert([{ 
+      descricao: form.descricao, valor: v, tipo: form.tipo, 
+      usuario: form.usuario, forma_pagamento: form.forma,
+      mes: new Intl.DateTimeFormat('pt-BR', {month: 'long'}).format(new Date()) 
+    }]);
+    setShowModal(false);
+    setForm({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista' });
+    carregarDados();
+  };
+
+  const subirFoto = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      await supabase.storage.from('perfis').upload('casal.png', file, { upsert: true });
+      carregarFotos();
+    }
+  };
 
   const totalGastos = lancamentos.reduce((acc, i) => i.tipo === 'despesa' ? acc + Number(i.valor) : acc, 0);
   const totalEntradas = lancamentos.reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc, 0);
   const saldoAtual = Number(config.saldo_inicial) + totalEntradas - totalGastos;
 
-  const bgClass = tema === 'dark' ? 'bg-[#0a0b0e] text-white' : 'bg-slate-50 text-slate-900';
-  const cardClass = tema === 'dark' ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm';
-
   return (
-    <div className={`max-w-md mx-auto min-h-screen transition-colors duration-500 ${bgClass} font-sans relative overflow-hidden`}>
+    <div className={`min-h-screen ${tema === 'dark' ? 'bg-[#0a0b0e] text-white' : 'bg-white text-slate-900'} font-sans relative overflow-x-hidden`}>
       
-      {/* MENU LATERAL OCULTO */}
-      <div className={`fixed inset-y-0 left-0 w-64 bg-slate-900 z-50 transform ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 shadow-2xl p-6`}>
-        <button onClick={() => setIsMenuOpen(false)} className="absolute top-6 right-6 text-2xl">✕</button>
-        <div className="mt-12 space-y-6">
-          <h3 className="text-xs font-black opacity-30 tracking-widest uppercase text-white">Menu Principal</h3>
-          <button onClick={() => {setAba('DASHBOARD'); setIsMenuOpen(false)}} className="block w-full text-left font-bold text-lg text-white">🏠 Dashboard</button>
-          <button onClick={() => {setAba('OBJETIVOS'); setIsMenuOpen(false)}} className="block w-full text-left font-bold text-lg text-white">🎯 Metas de Vida</button>
-          <button onClick={() => {setAba('PERFIL'); setIsMenuOpen(false)}} className="block w-full text-left font-bold text-lg text-white">👤 Perfil do Casal</button>
-          <div className="pt-6 border-t border-white/10">
-            <button onClick={() => setTema(tema === 'dark' ? 'light' : 'dark')} className="text-xs font-bold text-blue-400">🌗 MUDAR PARA MODO {tema === 'dark' ? 'CLARO' : 'ESCURO'}</button>
-          </div>
+      {/* MENU LATERAL */}
+      <div className={`fixed inset-y-0 left-0 w-72 bg-[#121418] z-50 transform ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-500 shadow-[20px_0_60px_rgba(0,0,0,0.5)] p-8`}>
+        <div className="flex justify-between items-center mb-10">
+          <h2 className="font-black italic text-xl">MENU</h2>
+          <button onClick={() => setIsMenuOpen(false)} className="text-2xl">✕</button>
         </div>
+        <nav className="space-y-6">
+          <button onClick={() => {setAba('DASHBOARD'); setIsMenuOpen(false)}} className="block text-lg font-bold hover:text-purple-400 transition-colors">📊 Dashboard</button>
+          <button onClick={() => {setAba('CONFIG'); setIsMenuOpen(false)}} className="block text-lg font-bold hover:text-purple-400 transition-colors">⚙️ Configurações</button>
+          <button onClick={() => setTema(tema === 'dark' ? 'light' : 'dark')} className="mt-10 block text-[10px] font-black opacity-50 uppercase tracking-widest">Alternar Modo {tema === 'dark' ? 'Claro' : 'Escuro'}</button>
+        </nav>
       </div>
 
-      {/* HEADER FIXO */}
-      <header className="p-6 flex justify-between items-center">
-        <button onClick={() => setIsMenuOpen(true)} className="text-2xl font-bold">☰</button>
-        <div className="flex flex-col items-end">
-           <span className="text-[10px] font-black opacity-40 uppercase tracking-widest">Olá, Casal Célio & Brenda</span>
-           <div className="w-10 h-10 rounded-full border-2 border-purple-500 bg-slate-800 overflow-hidden mt-1">
-              {/* Foto única do casal vira aqui */}
-              <div className="w-full h-full flex items-center justify-center text-[8px] font-bold">CB</div>
-           </div>
+      {/* HEADER */}
+      <header className="p-6 flex justify-between items-center max-w-md mx-auto">
+        <button onClick={() => setIsMenuOpen(true)} className="text-2xl">☰</button>
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-black opacity-40 uppercase text-right leading-none">Célio & Brenda</span>
+          <div onClick={() => fileInputRef.current.click()} className="w-12 h-12 rounded-full border-2 border-purple-600 bg-slate-800 overflow-hidden cursor-pointer active:scale-90 transition-transform">
+             <img src={fotoUrl || 'https://via.placeholder.com/150'} className="w-full h-full object-cover" />
+             <input type="file" ref={fileInputRef} onChange={subirFoto} className="hidden" />
+          </div>
         </div>
       </header>
 
-      {/* CONTEÚDO CENTRAL (DASH) */}
-      <main className="px-6 pb-24">
-        {aba === 'DASHBOARD' && (
-          <div className="animate-in fade-in zoom-in duration-500">
-            <div className={`p-8 rounded-[3rem] border ${cardClass} mb-8 text-center relative overflow-hidden`}>
-              <div className="absolute -top-10 -right-10 w-32 h-32 bg-purple-500/10 rounded-full blur-3xl"></div>
-              <p className="text-[10px] font-black opacity-50 uppercase tracking-tighter mb-2 italic">Saúde Financeira Atual</p>
+      <main className="max-w-md mx-auto px-6 pb-32">
+        {aba === 'DASHBOARD' ? (
+          <div className="animate-in fade-in duration-700">
+            <div className="bg-gradient-to-br from-purple-700 to-indigo-900 p-8 rounded-[3rem] shadow-2xl mb-10">
+              <p className="text-[10px] font-black opacity-70 uppercase mb-2">Saúde Financeira do Casal</p>
               <h1 className="text-5xl font-black tracking-tighter">R$ {saldoAtual.toLocaleString('pt-BR')}</h1>
-              <p className="text-[9px] mt-4 opacity-40 uppercase font-bold tracking-widest">Ponto Zero: R$ {config.saldo_inicial}</p>
+              <div className="flex justify-between mt-6 text-[10px] font-bold opacity-80 uppercase pt-4 border-t border-white/20">
+                <span>Renda: R$ {config.renda_fixa}</span>
+                <span>Ponto 0: R$ {config.saldo_inicial}</span>
+              </div>
             </div>
 
             <div className="space-y-4">
-               <h3 className="text-[10px] font-black opacity-30 uppercase tracking-[0.2em]">Fluxo de Caixa</h3>
-               {lancamentos.slice(0, 5).map(i => (
-                 <div key={i.id} className={`p-5 rounded-3xl border ${cardClass} flex justify-between items-center`}>
-                    <div className="flex items-center gap-4">
-                       <span className={`text-xl ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>{i.tipo === 'entrada' ? '●' : '○'}</span>
-                       <div>
-                          <p className="font-bold text-sm">{i.descricao}</p>
-                          <p className="text-[9px] opacity-40 uppercase font-bold">{i.usuario}</p>
-                       </div>
+              <h3 className="text-[10px] font-black opacity-30 uppercase tracking-widest">Últimos Lançamentos</h3>
+              {lancamentos.map(i => (
+                <div key={i.id} className="bg-white/5 border border-white/5 p-5 rounded-[2rem] flex justify-between items-center transition-all hover:bg-white/10">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-2 h-2 rounded-full ${i.tipo === 'entrada' ? 'bg-green-400' : 'bg-red-400'}`}></div>
+                    <div>
+                      <p className="font-bold text-sm">{i.descricao}</p>
+                      <p className="text-[9px] opacity-40 font-bold uppercase">{i.usuario} • {i.forma_pagamento}</p>
                     </div>
-                    <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-400' : 'text-red-400'}`}>R$ {Number(i.valor).toFixed(2)}</p>
-                 </div>
-               ))}
+                  </div>
+                  <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-400' : 'text-red-400'}`}>R$ {Number(i.valor).toFixed(2)}</p>
+                </div>
+              ))}
             </div>
           </div>
-        )}
-
-        {aba === 'PERFIL' && (
-          <div className="p-6 rounded-3xl border border-white/10 bg-white/5 space-y-6">
-             <h3 className="font-black text-xl italic uppercase">Configurações de Casal</h3>
-             <div>
-                <label className="text-[10px] font-black opacity-40 uppercase">Saldo Inicial (Ponto 0)</label>
-                <input type="number" className="w-full bg-black/20 p-4 rounded-xl mt-1 border border-white/10 outline-none font-bold" 
-                  value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} />
-                <button onClick={async () => await supabase.from('configuracoes').upsert({id: 1, saldo_inicial: config.saldo_inicial})} className="mt-2 text-[10px] font-black text-green-400 uppercase tracking-widest">💾 Salvar Ponto Zero</button>
-             </div>
+        ) : (
+          <div className="p-8 bg-white/5 rounded-[3rem] border border-white/10 space-y-8">
+            <h2 className="font-black text-2xl italic uppercase underline decoration-purple-500">Configurações</h2>
+            <div>
+              <label className="text-[10px] font-black opacity-50 uppercase mb-2 block">Saldo Inicial (Ponto 0)</label>
+              <input type="number" value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} className="w-full bg-white/5 p-4 rounded-2xl outline-none font-bold text-xl border border-white/10" />
+            </div>
+            <div>
+              <label className="text-[10px] font-black opacity-50 uppercase mb-2 block">Renda Mensal Fixa</label>
+              <input type="number" value={config.renda_fixa} onChange={e => setConfig({...config, renda_fixa: e.target.value})} className="w-full bg-white/5 p-4 rounded-2xl outline-none font-bold text-xl border border-white/10" />
+            </div>
+            <button onClick={async () => await supabase.from('configuracoes').upsert({id: 1, ...config})} className="w-full bg-purple-600 py-4 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95 transition-transform">Salvar Configurações</button>
           </div>
         )}
       </main>
 
-      {/* BOTÃO FLUTUANTE DE LANÇAMENTO */}
-      <button className="fixed bottom-8 right-8 w-16 h-16 bg-white text-black rounded-full shadow-2xl flex items-center justify-center text-2xl font-bold active:scale-90 transition-transform z-40">
+      {/* BOTÃO "+" FUNCIONAL */}
+      <button onClick={() => setShowModal(true)} className="fixed bottom-10 left-1/2 -translate-x-1/2 w-16 h-16 bg-white text-black rounded-full shadow-[0_15px_40px_rgba(255,255,255,0.2)] flex items-center justify-center text-2xl font-bold z-40 active:scale-90 transition-transform">
         +
       </button>
 
+      {/* MODAL DE LANÇAMENTO */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-6 animate-in fade-in duration-300 backdrop-blur-md">
+          <div className="w-full max-w-sm bg-[#121418] p-8 rounded-[3rem] border border-white/10 shadow-2xl">
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="font-black text-lg italic uppercase">Novo Lançamento</h3>
+              <button onClick={() => setShowModal(false)} className="text-2xl">✕</button>
+            </div>
+            <form onSubmit={salvar} className="space-y-4">
+              <div className="flex gap-2 p-1 bg-white/5 rounded-2xl">
+                {['Célio', 'Brenda'].map(u => (
+                  <button key={u} type="button" onClick={() => setForm({...form, usuario: u})} className={`flex-1 py-3 rounded-xl text-[10px] font-black ${form.usuario === u ? 'bg-white text-black' : 'opacity-30'}`}>{u.toUpperCase()}</button>
+                ))}
+              </div>
+              <input type="text" placeholder="Descrição" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/10 font-bold" />
+              <div className="flex gap-2">
+                 <input type="number" placeholder="Valor" value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} className="flex-[2] bg-white/5 p-4 rounded-2xl outline-none border border-white/10 font-black text-xl" />
+                 <select value={form.tipo} onChange={e => setForm({...form, tipo: e.target.value})} className="flex-1 bg-white/5 p-4 rounded-2xl outline-none border border-white/10 text-[10px] font-black uppercase">
+                    <option value="despesa">💸 Gasto</option>
+                    <option value="entrada">💰 Ganho</option>
+                 </select>
+              </div>
+              <select value={form.forma} onChange={e => setForm({...form, forma: e.target.value})} className="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/10 text-[10px] font-black uppercase">
+                 <option value="À Vista">À Vista</option>
+                 <option value="Cartão de Crédito">Cartão de Crédito</option>
+              </select>
+              <button type="submit" className="w-full bg-white text-black py-4 rounded-2xl font-black text-xs uppercase mt-6 shadow-xl">Confirmar Lançamento</button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
