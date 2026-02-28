@@ -10,6 +10,9 @@ function App() {
   const [config, setConfig] = useState({ saldo_inicial: 0, data_inicio: '' });
   const [ciclo, setCiclo] = useState({ data_inicio: '', duracao: 28 });
   
+  // ESTADO DE EDIÇÃO (CRUCIAL): Guarda o ID do lançamento sendo editado
+  const [editingEntryId, setEditingEntryId] = useState(null);
+  
   // Novo formulário com 'previsibilidade' (Fixo/Variável)
   const [form, setForm] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável' });
   const [fotoUrl, setFotoUrl] = useState(null);
@@ -46,7 +49,7 @@ function App() {
     
     setSalvandoFoto(false);
     if (error) {
-      alert("Erro ao salvar foto. Verifique as permissões no Supabase (RLS). Erro: " + error.message);
+      alert("Erro ao salvar foto. Verifique se você executou a SQL de permissões (UPDATE/DELETE) no Supabase. Erro: " + error.message);
     } else {
       carregarDados();
     }
@@ -55,14 +58,76 @@ function App() {
   const salvarGasto = async (e) => {
     e.preventDefault();
     const v = parseFloat(String(form.valor).replace(',', '.'));
-    await supabase.from('fluxo').insert([{ 
-      descricao: form.descricao, valor: v, tipo: form.tipo, 
-      usuario: form.usuario, forma_pagamento: form.forma, escopo: form.escopo, previsibilidade: form.previsibilidade,
+    
+    // Constrói o objeto de dados final
+    const dadosParaSalvar = { 
+      descricao: form.descricao, 
+      valor: v, 
+      tipo: form.tipo, 
+      usuario: form.usuario, 
+      forma_pagamento: form.forma, 
+      escopo: form.escopo, 
+      previsibilidade: form.previsibilidade,
       mes: new Intl.DateTimeFormat('pt-BR', {month: 'long'}).format(new Date()) 
-    }]);
-    setShowModal(false);
-    setForm({ ...form, descricao: '', valor: '' }); // Limpa só os campos de texto
+    };
+
+    if (editingEntryId) {
+      // SE TEM ID, É EDIÇÃO
+      const { error } = await supabase.from('fluxo').update(dadosParaSalvar).eq('id', editingEntryId);
+      if (error) {
+        alert("Erro ao atualizar lançamento. Verifique se você executou a SQL de permissões (UPDATE) no Supabase. Erro: " + error.message);
+      } else {
+        alert("Lançamento atualizado com sucesso!");
+      }
+    } else {
+      // SE NÃO TEM ID, É NOVO LANÇAMENTO
+      const { error } = await supabase.from('fluxo').insert([dadosParaSalvar]);
+      if (error) {
+        alert("Erro ao inserir lançamento. Erro: " + error.message);
+      } else {
+        alert("Lançamento inserido com sucesso!");
+      }
+    }
+
+    fecharModal();
     carregarDados();
+  };
+
+  // Função para abrir o modal para editar um item existente
+  const iniciarEdicao = (entry) => {
+    setEditingEntryId(entry.id);
+    setForm({
+      descricao: entry.descricao,
+      valor: String(entry.valor).replace('.', ','),
+      tipo: entry.tipo,
+      usuario: entry.usuario,
+      forma: entry.forma_pagamento,
+      escopo: entry.escopo,
+      previsibilidade: entry.previsibilidade
+    });
+    setShowModal(true);
+  };
+
+  const fecharModal = () => {
+    setShowModal(false);
+    setEditingEntryId(null); // Reseta o estado de edição
+    setForm({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável' }); // Limpa o formulário
+  };
+
+  // Função para APAGAR o lançamento (CRUCIAL)
+  const apagarLancamento = async () => {
+    if (!editingEntryId) return;
+    if (confirm("Tem certeza que deseja APAGAR este lançamento para sempre? Não há volta!")) {
+      const { error } = await supabase.from('fluxo').delete().eq('id', editingEntryId);
+      
+      if (error) {
+        alert("Erro ao apagar lançamento. Verifique as permissões (DELETE) no Supabase. Erro: " + error.message);
+      } else {
+        alert("Lançamento apagado definitivamente.");
+        fecharModal();
+        carregarDados();
+      }
+    }
   };
 
   const salvarCiclo = async (e) => {
@@ -88,25 +153,17 @@ function App() {
   const saldoCelio = lancamentos.filter(i => i.escopo === 'celio').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
   const saldoBrenda = lancamentos.filter(i => i.escopo === 'brenda').reduce((acc, i) => i.tipo === 'entrada' ? acc + Number(i.valor) : acc - Number(i.valor), 0);
 
-  // MOTOR DO CICLO MENSTRUAL (MÉTODO DRAUZIO VARELLA)
+  // MOTOR DO CICLO MENSTRUAL
   let infoCiclo = { fase: "Aguardando dados...", cor: "text-gray-400", diasProxima: 0, ovulacaoData: '' };
   
   if (ciclo.data_inicio) {
     const hoje = new Date();
     hoje.setHours(0,0,0,0);
-    
-    // Converte a data do banco corrigindo fuso horário
     const inicio = new Date(ciclo.data_inicio + 'T00:00:00'); 
-    
-    // Próxima Menstruação (Início + Duração)
     const proximaMenstruacao = new Date(inicio);
     proximaMenstruacao.setDate(inicio.getDate() + Number(ciclo.duracao));
-    
-    // Ovulação (14 dias ANTES da próxima menstruação)
     const ovulacao = new Date(proximaMenstruacao);
     ovulacao.setDate(proximaMenstruacao.getDate() - 14);
-    
-    // Período Fértil (5 dias antes, 1 dia depois da ovulação)
     const inicioFertil = new Date(ovulacao);
     inicioFertil.setDate(ovulacao.getDate() - 5);
     const fimFertil = new Date(ovulacao);
@@ -183,7 +240,6 @@ function App() {
             <div className="bg-gradient-to-br from-purple-800 via-indigo-900 to-black p-8 rounded-[3rem] shadow-2xl mb-8 text-white relative overflow-hidden">
               <p className="text-[10px] font-black opacity-60 uppercase mb-1">Caixa Geral do Casal</p>
               <h1 className="text-5xl font-black tracking-tighter">R$ {saldoAtualCasal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
-              
               <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-white/20 text-[9px] font-black uppercase tracking-widest">
                  <div>
                     <span className="opacity-50 block mb-1">Início da Contagem</span>
@@ -196,24 +252,12 @@ function App() {
               </div>
             </div>
 
-            {/* RESUMO FIXO VS VARIÁVEL */}
-            <div className="grid grid-cols-2 gap-4 mb-8">
-               <div className={`p-5 rounded-[2rem] border ${bgCard}`}>
-                  <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Despesas Fixas</p>
-                  <p className="text-lg font-black text-red-500">R$ {despesasFixas.toFixed(2)}</p>
-               </div>
-               <div className={`p-5 rounded-[2rem] border ${bgCard}`}>
-                  <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Despesas Variáveis</p>
-                  <p className="text-lg font-black text-orange-400">R$ {despesasVariaveis.toFixed(2)}</p>
-               </div>
-            </div>
-
-            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Últimos Lançamentos (Geral)</h3>
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Últimos Lançamentos (Toque para Editar)</h3>
             <div className="space-y-3">
               {gastosCasal.slice(0, 10).map(i => (
-                <div key={i.id} className={`p-4 rounded-[1.5rem] border flex justify-between items-center ${bgCard}`}>
+                <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer transition-all hover:border-purple-500/20 active:scale-[0.98] ${bgCard}`}>
                   <div className="flex items-center gap-4">
-                    <div className={`w-2 h-2 rounded-full ${i.tipo === 'entrada' ? 'bg-green-500' : (i.previsibilidade === 'Fixa' ? 'bg-red-600' : 'bg-orange-400')}`}></div>
+                    <div className={`w-2 h-2 rounded-full ${i.tipo === 'entrada' ? 'bg-green-500 shadow-[0_0_8px_rgba(74,222,128,0.5)]' : (i.previsibilidade === 'Fixa' ? 'bg-red-600' : 'bg-orange-400')}`}></div>
                     <div>
                       <p className="font-bold text-sm leading-none mb-1">{i.descricao}</p>
                       <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.usuario} • {i.previsibilidade} • {i.forma_pagamento}</p>
@@ -232,11 +276,10 @@ function App() {
           <div className="animate-in fade-in duration-500 space-y-6">
             <div className="bg-blue-600 text-white p-8 rounded-[3rem] shadow-xl text-center">
                <h2 className="font-black text-2xl uppercase italic">Gasto Pessoal Célio</h2>
-               <p className="text-xs opacity-70 mt-2">Este valor é seu e não afeta o caixa conjunto.</p>
                <h1 className="text-4xl font-black mt-4">R$ {saldoCelio.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
             {lancamentos.filter(i => i.escopo === 'celio').map(i => (
-                <div key={i.id} className={`p-4 rounded-[1.5rem] border flex justify-between items-center ${bgCard}`}>
+                <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <p className="font-bold text-sm">{i.descricao}</p>
                   <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
                 </div>
@@ -250,8 +293,6 @@ function App() {
                <h2 className="font-black text-2xl uppercase italic">Caixa Pessoal Brenda</h2>
                <h1 className="text-4xl font-black mt-4">R$ {saldoBrenda.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
-            
-            {/* MOTOR DO CICLO ATUALIZADO */}
             <div className={`p-6 rounded-[2rem] border ${bgCard}`}>
                <h3 className="font-black text-xl text-pink-500 italic uppercase mb-6 flex justify-between items-center">
                   <span>🌸 Saúde Íntima</span>
@@ -265,16 +306,10 @@ function App() {
                      <p className={`text-[10px] font-black uppercase mt-3 ${textMuted}`}>Data provável da Ovulação: {infoCiclo.ovulacaoData}</p>
                   )}
                </div>
-
                <form onSubmit={salvarCiclo} className="space-y-4">
-                  <div className="bg-pink-500/10 p-4 rounded-2xl mb-4 border border-pink-500/20">
-                     <p className="text-[9px] font-bold text-pink-500 italic leading-relaxed">
-                        * O 1º dia é o início do sangramento intenso. A ovulação ocorre ~14 dias ANTES do próximo ciclo.
-                     </p>
-                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Dia 1 (Última Menstruação)</label>
+                      <label className={`text-[9px] font-black uppercase mb-1 block ${textMuted}`}>Dia 1 (Sangramento)</label>
                       <input type="date" value={ciclo.data_inicio} onChange={e => setCiclo({...ciclo, data_inicio: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} />
                     </div>
                     <div>
@@ -282,13 +317,11 @@ function App() {
                       <input type="number" placeholder="28" value={ciclo.duracao} onChange={e => setCiclo({...ciclo, duracao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-xs ${inputClass}`} />
                     </div>
                   </div>
-                  <button type="submit" className="w-full bg-pink-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95 transition-transform mt-2">Calcular e Salvar Ciclo</button>
+                  <button type="submit" className="w-full bg-pink-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl">Calcular e Salvar Ciclo</button>
                </form>
             </div>
-
-            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Histórico de Gastos Pessoais</h3>
             {lancamentos.filter(i => i.escopo === 'brenda').map(i => (
-                <div key={i.id} className={`p-4 rounded-[1.5rem] border flex justify-between items-center ${bgCard}`}>
+                <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <p className="font-bold text-sm">{i.descricao}</p>
                   <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
                 </div>
@@ -296,17 +329,9 @@ function App() {
           </div>
         )}
 
-        {/* CONFIGURAÇÕES DE PONTO ZERO E INÍCIO */}
         {aba === 'CONFIG' && (
           <div className={`p-8 rounded-[3rem] border space-y-6 ${bgCard}`}>
             <h2 className="font-black text-2xl italic uppercase text-purple-500 mb-8">Ponto de Partida</h2>
-            
-            <div className="bg-purple-500/10 p-4 rounded-2xl border border-purple-500/20">
-               <p className="text-[10px] font-bold text-purple-400 italic leading-relaxed">
-                  Defina a data exata que vocês começaram a usar o App e quanto dinheiro havia na conta bancária geral neste dia.
-               </p>
-            </div>
-
             <div>
               <label className={`text-[9px] font-black uppercase block mb-2 ${textMuted}`}>Data de Início do App</label>
               <input type="date" value={config.data_inicio} onChange={e => setConfig({...config, data_inicio: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-lg ${inputClass}`} />
@@ -318,7 +343,7 @@ function App() {
             <button onClick={async () => {
               await supabase.from('configuracoes').upsert({id: 1, ...config});
               alert("Marco Zero configurado!");
-            }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase shadow-xl active:scale-95 mt-4">💾 Salvar Ponto Zero</button>
+            }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95">Salvar Marco Zero</button>
           </div>
         )}
       </main>
@@ -328,13 +353,16 @@ function App() {
         +
       </button>
 
-      {/* MODAL DE LANÇAMENTO COMPLETO */}
+      {/* MODAL DE LANÇAMENTO (INTELIGENTE: NOVO VS EDITAR) */}
       {showModal && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-md">
           <div className={`w-full max-w-sm p-8 rounded-[3rem] border shadow-2xl ${isDark ? 'bg-[#121418] border-white/10' : 'bg-white border-slate-200'}`}>
             <div className="flex justify-between items-center mb-6">
-              <h3 className="font-black text-xl italic uppercase">Lançamento</h3>
-              <button onClick={() => setShowModal(false)} className={`text-2xl ${textMuted}`}>✕</button>
+              {/* TÍTULO DINÂMICO */}
+              <h3 className="font-black text-xl italic uppercase">
+                {editingEntryId ? 'Editar Lançamento' : 'Novo Lançamento'}
+              </h3>
+              <button onClick={fecharModal} className={`text-2xl ${textMuted}`}>✕</button>
             </div>
             
             <form onSubmit={salvarGasto} className="space-y-4">
@@ -355,10 +383,10 @@ function App() {
                 </div>
               )}
 
-              <input type="text" placeholder="O que foi? (Ex: Aluguel, Supermercado)" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold ${inputClass}`} required />
+              <input type="text" placeholder="No que foi? (Ex: Aluguel)" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold ${inputClass}`} required />
               
               <div className="grid grid-cols-2 gap-3">
-                 <input type="number" placeholder="R$ 0,00" value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-black text-xl ${inputClass}`} required />
+                 <input type="text" inputMode="decimal" placeholder="R$ 0,00" value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-black text-xl ${inputClass}`} required />
                  <select value={form.tipo} onChange={e => setForm({...form, tipo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
                     <option value="despesa">💸 Saída</option>
                     <option value="entrada">💰 Entrada</option>
@@ -370,17 +398,23 @@ function App() {
                     <option value="À Vista">💵 À Vista</option>
                     <option value="Cartão de Crédito">💳 Crédito</option>
                  </select>
-                 
-                 {/* NOVO: Fixo vs Variável */}
                  <select value={form.previsibilidade} onChange={e => setForm({...form, previsibilidade: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[9px] font-black uppercase ${inputClass}`}>
-                    <option value="Variável">🍔 Variável (Lazer, iFood)</option>
-                    <option value="Fixa">🏠 Fixo (Conta, Renda)</option>
+                    <option value="Variável">🍔 Variável</option>
+                    <option value="Fixa">🏠 Fixa</option>
                  </select>
               </div>
               
-              <button type="submit" className="w-full bg-purple-600 text-white py-5 rounded-2xl font-black text-[11px] uppercase mt-2 shadow-xl active:scale-95 transition-all">
-                Lançar no Sistema
-              </button>
+              {/* BOTÕES DE AÇÃO: Salvar e (Se for Edição) Apagar */}
+              <div className="flex gap-3 mt-6 pt-6 border-t border-gray-500/10">
+                  {editingEntryId && (
+                    <button type="button" onClick={apagarLancamento} className="flex-1 bg-gray-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase active:scale-95 transition-all">
+                      🗑️ Apagar
+                    </button>
+                  )}
+                  <button type="submit" className={`flex-[2] py-4 rounded-2xl font-black text-[11px] uppercase shadow-xl active:scale-95 transition-all ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}>
+                    {editingEntryId ? 'Salvar Alterações' : 'Lançar no Caixa'}
+                  </button>
+              </div>
             </form>
           </div>
         </div>
