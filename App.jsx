@@ -18,15 +18,12 @@ function App() {
   const [lancamentos, setLancamentos] = useState(() => {
     const salvo = localStorage.getItem('@financasCB:lancamentos'); return salvo ? JSON.parse(salvo) : [];
   });
-  
   const [contratos, setContratos] = useState(() => {
     const salvo = localStorage.getItem('@financasCB:contratos'); return salvo ? JSON.parse(salvo) : [];
   });
-  
   const [config, setConfig] = useState(() => {
     const salvo = localStorage.getItem('@financasCB:config'); return salvo ? JSON.parse(salvo) : { saldo_inicial: 0, data_inicio: '' };
   });
-  
   const [ciclo, setCiclo] = useState(() => {
     const salvo = localStorage.getItem('@financasCB:ciclo'); return salvo ? JSON.parse(salvo) : { data_inicio: '', duracao: 28 };
   });
@@ -35,8 +32,6 @@ function App() {
   const [editingEntryId, setEditingEntryId] = useState(null);
   
   const dataHoje = new Date().toISOString().split('T')[0];
-  
-  // FORMULÁRIO ATUALIZADO COM PARCELAS
   const [form, setForm] = useState({ 
     descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', 
     forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável', 
@@ -44,9 +39,13 @@ function App() {
   });
   
   const [formContrato, setFormContrato] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', escopo: 'casal', data_inicio: dataHoje });
-
   const [salvandoFoto, setSalvandoFoto] = useState(false);
   const fileInputRef = useRef(null);
+
+  // Sincroniza a cor do fundo da página inteira para não dar tela cortada
+  useEffect(() => {
+    document.body.style.backgroundColor = tema === 'dark' ? '#0a0b0e' : '#f1f5f9';
+  }, [tema]);
 
   // SENSOR DE SWIPE
   const [touchStart, setTouchStart] = useState(null);
@@ -106,32 +105,27 @@ function App() {
     const file = e.target.files[0];
     if (!file) return;
     setSalvandoFoto(true);
-    await supabase.storage.from('perfis').upload('casal.png', file, { upsert: true, cacheControl: '0' });
+    const { error } = await supabase.storage.from('perfis').upload('casal.png', file, { upsert: true, cacheControl: '0' });
     setSalvandoFoto(false);
-    carregarDados();
-    mostrarAviso("Foto atualizada com sucesso! 📸", "sucesso");
+    
+    if (error) {
+      mostrarAviso("Erro no banco: " + error.message, "erro");
+    } else {
+      carregarDados();
+      mostrarAviso("Foto atualizada com sucesso! 📸", "sucesso");
+    }
   };
 
-  // SALVAMENTO DE GASTOS (AGORA COM LÓGICA DE PARCELAMENTO)
   const salvarGasto = async (e) => {
     e.preventDefault();
     const vTotal = parseFloat(String(form.valor).replace(',', '.'));
     const pTotal = Number(form.parcelas_totais) || 1;
-    
-    // Se parcelou, divide o valor. Se não, é o valor cheio.
     const vParcela = pTotal > 1 ? (vTotal / pTotal) : vTotal;
 
     const dadosParaSalvar = { 
-      descricao: form.descricao, 
-      valor: vTotal, // Salva o valor total para referência
-      valor_parcela: vParcela, // Salva o valor da parcela fracionada
-      parcelas_totais: pTotal,
-      tipo: form.tipo, 
-      usuario: form.usuario, 
-      forma_pagamento: form.forma, 
-      escopo: form.escopo, 
-      previsibilidade: form.previsibilidade, 
-      data_lancamento: form.data 
+      descricao: form.descricao, valor: vTotal, valor_parcela: vParcela, parcelas_totais: pTotal,
+      tipo: form.tipo, usuario: form.usuario, forma_pagamento: form.forma, 
+      escopo: form.escopo, previsibilidade: form.previsibilidade, data_lancamento: form.data 
     };
 
     if (editingEntryId) {
@@ -139,26 +133,18 @@ function App() {
       mostrarAviso("Lançamento alterado! ✏️", "info");
     } else {
       await supabase.from('fluxo').insert([dadosParaSalvar]);
-      
-      if (form.tipo === 'entrada') {
-        mostrarAviso("Eita, bicho! Bora gastá! 🤑", "sucesso");
-      } else if (pTotal > 1) {
-        mostrarAviso(`Mais uma dívida pra conta... em ${pTotal}x! 💳`, "erro");
-      } else if (vTotal > 500) {
-        mostrarAviso("Lá se vai nosso suado dinheirinho... 💸", "erro");
-      } else {
-        mostrarAviso("Gasto registrado com dor no coração! 📉", "erro");
-      }
+      if (form.tipo === 'entrada') mostrarAviso("Eita, bicho! Bora gastá! 🤑", "sucesso");
+      else if (pTotal > 1) mostrarAviso(`Mais uma dívida pra conta... em ${pTotal}x! 💳`, "erro");
+      else if (vTotal > 500) mostrarAviso("Lá se vai nosso suado dinheirinho... 💸", "erro");
+      else mostrarAviso("Gasto registrado com dor no coração! 📉", "erro");
     }
-    
     fecharModal(); carregarDados();
   };
 
   const salvarContratoFixo = async (e) => {
     e.preventDefault();
     const v = parseFloat(String(formContrato.valor).replace(',', '.'));
-    const dados = { ...formContrato, valor: v };
-    await supabase.from('contratos_fixos').insert([dados]);
+    await supabase.from('contratos_fixos').insert([{ ...formContrato, valor: v }]);
     setFormContrato({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', escopo: 'casal', data_inicio: dataHoje });
     mostrarAviso("Conta Fixa ativada! Vai descontar sozinho agora. 🔁", "info");
     carregarDados();
@@ -174,17 +160,11 @@ function App() {
   const iniciarEdicao = (entry) => {
     if (entry.isVirtualContrato) return alert("Esta é uma Conta Fixa. Vá no menu 'Contas Fixas' para editá-la.");
     if (entry.isVirtualParcela) return alert("Esta é uma parcela. Procure o mês da compra original para editar o valor total.");
-    
     setEditingEntryId(entry.id);
     setForm({
-      descricao: entry.descricao, 
-      valor: String(entry.valor).replace('.', ','),
-      tipo: entry.tipo, 
-      usuario: entry.usuario, 
-      forma: entry.forma_pagamento,
-      escopo: entry.escopo, 
-      previsibilidade: entry.previsibilidade, 
-      data: entry.data_lancamento,
+      descricao: entry.descricao, valor: String(entry.valor).replace('.', ','),
+      tipo: entry.tipo, usuario: entry.usuario, forma: entry.forma_pagamento,
+      escopo: entry.escopo, previsibilidade: entry.previsibilidade, data: entry.data_lancamento,
       parcelas_totais: entry.parcelas_totais || 1
     });
     setShowModal(true);
@@ -211,94 +191,65 @@ function App() {
     carregarDados();
   };
 
-  // --- MOTOR MATEMÁTICO AVANÇADO (CONTRATOS E PARCELAMENTOS) ---
+  // --- MOTOR MATEMÁTICO ---
   const mesAnoFiltro = dataFiltro.toISOString().slice(0, 7); 
   const ultimoDiaDoMesVisualizado = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0).toISOString().split('T')[0];
   const nomeMeses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
   const nomeMesAtual = `${nomeMeses[dataFiltro.getMonth()]} ${dataFiltro.getFullYear()}`;
 
-  // Calcula diferença de meses entre a data de uma compra e o mês que estamos olhando na tela
   const calcularDiferencaMeses = (dataInicioStr) => {
     if (!dataInicioStr) return -1;
     const inicio = new Date(dataInicioStr + 'T00:00:00');
     const filtro = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0); 
-    if (inicio > filtro) return -1; // Futuro (Ainda não aconteceu)
+    if (inicio > filtro) return -1; 
     const anos = filtro.getFullYear() - inicio.getFullYear();
     return (anos * 12) + (filtro.getMonth() - inicio.getMonth());
   };
 
-  // 1. GERAÇÃO DE PARCELAS VIRTUAIS NO EXTRATO
   let lancamentosExpandidos = [];
-  
   lancamentos.forEach(l => {
      const pTotais = Number(l.parcelas_totais) || 1;
-     
      if (pTotais === 1) {
-        // Gasto normal à vista ou sem parcela
         const dLanc = l.data_lancamento || '';
         if (dLanc.startsWith(mesAnoFiltro)) lancamentosExpandidos.push(l);
      } else {
-        // Gasto Parcelado (Ex: Carro em 48x)
         const difMeses = calcularDiferencaMeses(l.data_lancamento);
-        // Se a diferença for 0, é o mês 1 (o mês da compra).
-        // A parcela atual é a (difMeses + 1). Se a compra foi mês passado, estamos na parcela 2.
         const parcelaAtual = difMeses + 1; 
-
         if (difMeses >= 0 && parcelaAtual <= pTotais) {
            lancamentosExpandidos.push({
-              ...l,
-              id: difMeses === 0 ? l.id : `parcela-${l.id}-${parcelaAtual}`,
-              valor: l.valor_parcela, // Muda o valor para o valor da parcela na tela
-              isVirtualParcela: difMeses > 0, // Impede editar as parcelas filhas
-              tagParcela: `${parcelaAtual}/${pTotais}` // Ex: 2/12
+              ...l, id: difMeses === 0 ? l.id : `parcela-${l.id}-${parcelaAtual}`,
+              valor: l.valor_parcela, isVirtualParcela: difMeses > 0, tagParcela: `${parcelaAtual}/${pTotais}`
            });
         }
      }
   });
 
-  // 2. GERAÇÃO DE CONTRATOS VIRTUAIS NO EXTRATO
   const contratosVirtuais = contratos.filter(c => calcularDiferencaMeses(c.data_inicio) >= 0).map(c => ({
-     ...c,
-     id: 'virtual-ct-' + c.id,
-     isVirtualContrato: true, 
-     data_lancamento: `${mesAnoFiltro}-01`,
-     forma_pagamento: 'Débito Recorrente',
-     previsibilidade: 'Fixa'
+     ...c, id: 'virtual-ct-' + c.id, isVirtualContrato: true, 
+     data_lancamento: `${mesAnoFiltro}-01`, forma_pagamento: 'Débito Recorrente', previsibilidade: 'Fixa'
   }));
 
-  // Agrupa tudo para o extrato
   const todosLancamentosMes = [...lancamentosExpandidos, ...contratosVirtuais].sort((a,b) => new Date(b.data_lancamento) - new Date(a.data_lancamento));
-
   const extratoCasalMes = todosLancamentosMes.filter(i => i.escopo === 'casal');
   const extratoCelioMes = todosLancamentosMes.filter(i => i.escopo === 'celio');
   const extratoBrendaMes = todosLancamentosMes.filter(i => i.escopo === 'brenda');
 
-  // 3. CÁLCULO DO ACUMULADO (A CASCATA)
   const calcularSaldoAcumulado = (escopo) => {
      let saldo = 0;
-     
-     // Soma os avulsos e as parcelas passadas
      lancamentos.filter(i => i.escopo === escopo).forEach(l => {
         const pTotais = Number(l.parcelas_totais) || 1;
         const difMeses = calcularDiferencaMeses(l.data_lancamento);
-        
         if (difMeses >= 0) {
-           if (pTotais === 1) {
-              saldo += l.tipo === 'entrada' ? Number(l.valor) : -Number(l.valor);
-           } else {
-              // Soma quantas parcelas já venceram até o mês atual
+           if (pTotais === 1) saldo += l.tipo === 'entrada' ? Number(l.valor) : -Number(l.valor);
+           else {
               const parcelasVencidas = Math.min(difMeses + 1, pTotais);
               saldo += l.tipo === 'entrada' ? (Number(l.valor_parcela) * parcelasVencidas) : -(Number(l.valor_parcela) * parcelasVencidas);
            }
         }
      });
-     
-     // Soma os contratos mensais
      contratos.filter(c => c.escopo === escopo).forEach(c => {
         const mesesAtivos = calcularDiferencaMeses(c.data_inicio) + 1;
-        if (mesesAtivos > 0) {
-           saldo += c.tipo === 'entrada' ? (Number(c.valor) * mesesAtivos) : -(Number(c.valor) * mesesAtivos);
-        }
+        if (mesesAtivos > 0) saldo += c.tipo === 'entrada' ? (Number(c.valor) * mesesAtivos) : -(Number(c.valor) * mesesAtivos);
      });
      return saldo;
   };
@@ -310,7 +261,6 @@ function App() {
   const despesasFixasMes = extratoCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Fixa').reduce((acc, i) => acc + Number(i.valor), 0);
   const despesasVariaveisMes = extratoCasalMes.filter(i => i.tipo === 'despesa' && i.previsibilidade === 'Variável').reduce((acc, i) => acc + Number(i.valor), 0);
 
-  // MOTOR DO CICLO
   let infoCiclo = { fase: "Aguardando dados...", cor: "text-gray-400", diasProxima: 0, ovulacaoData: '' };
   if (ciclo.data_inicio) {
     const hoje = new Date(); hoje.setHours(0,0,0,0);
@@ -333,19 +283,21 @@ function App() {
     else { infoCiclo.fase = "🔄 Ciclo Atrasado"; infoCiclo.cor = "text-orange-500"; infoCiclo.diasProxima = 0; }
   }
 
+  // CLASSES DINÂMICAS PARA TEMA CLARO E ESCURO
   const isDark = tema === 'dark';
   const bgBody = isDark ? 'bg-[#0a0b0e]' : 'bg-slate-100';
   const textBody = isDark ? 'text-white' : 'text-slate-900';
   const bgMenu = isDark ? 'bg-[#121418] border-r border-white/5' : 'bg-white border-r border-slate-200 shadow-2xl';
   const bgCard = isDark ? 'bg-white/[0.03] border-white/5' : 'bg-white border-slate-200 shadow-sm';
   const textMuted = isDark ? 'opacity-40' : 'text-slate-500';
-  const inputClass = isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-300 text-slate-900';
+  // Input class ajustada para ter contraste no tema escuro e claro
+  const inputClass = isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400';
 
   return (
     <div className={`min-h-screen ${bgBody} ${textBody} font-sans overflow-x-hidden transition-colors duration-300`}>
       
       {toast && (
-        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl animate-in slide-in-from-top-4 fade-in duration-300 ${toast.tipo === 'sucesso' ? 'bg-green-500 text-black' : toast.tipo === 'erro' ? 'bg-red-500 text-white' : 'bg-purple-600 text-white'}`}>
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full font-black text-[10px] uppercase tracking-widest shadow-2xl w-max max-w-[90%] text-center animate-in slide-in-from-top-4 fade-in duration-300 ${toast.tipo === 'sucesso' ? 'bg-green-500 text-black' : toast.tipo === 'erro' ? 'bg-red-500 text-white' : 'bg-purple-600 text-white'}`}>
           {toast.mensagem}
         </div>
       )}
@@ -370,12 +322,22 @@ function App() {
 
       <header className="p-6 flex justify-between items-center max-w-md mx-auto">
         <button onClick={() => setIsMenuOpen(true)} className={`text-2xl p-2 rounded-xl ${isDark ? 'bg-white/5' : 'bg-slate-200'}`}>☰</button>
-        <div className="text-right">
-           <span className={`block text-[10px] font-black uppercase ${textMuted}`}>Olá, Casal</span>
-           <span className="text-xs font-bold text-purple-500 italic">Célio & Brenda</span>
+        
+        {/* TEXTO DO CABEÇALHO 100% ALINHADO (CORRIGIDO) */}
+        <div className="flex flex-col items-end justify-center mr-3 flex-1">
+           <span className={`text-[10px] font-black uppercase leading-none mb-1 ${textMuted}`}>Olá, Casal</span>
+           <span className="text-xs font-bold text-purple-500 italic leading-none">Célio & Brenda</span>
         </div>
-        <div onClick={() => !salvandoFoto && fileInputRef.current.click()} className={`w-12 h-12 rounded-full border-2 border-purple-600 overflow-hidden cursor-pointer shadow-lg relative flex items-center justify-center ${salvandoFoto ? 'animate-pulse bg-purple-900' : ''}`}>
-           {salvandoFoto ? <span className="text-[8px] font-black">⚙️</span> : <img src={fotoUrl || 'https://via.placeholder.com/150'} className="w-full h-full object-cover bg-slate-800" />}
+        
+        {/* FOTO COM FALLBACK ANTI-QUEBRA */}
+        <div onClick={() => !salvandoFoto && fileInputRef.current.click()} className={`w-12 h-12 rounded-full border-2 border-purple-600 overflow-hidden cursor-pointer shadow-lg relative flex items-center justify-center shrink-0 ${salvandoFoto ? 'animate-pulse bg-purple-900' : 'bg-slate-800'}`}>
+           {salvandoFoto ? <span className="text-[8px] font-black text-white">⚙️</span> : (
+             <img 
+               src={fotoUrl || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'} 
+               onError={(e) => { e.target.onerror = null; e.target.src = 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'; }}
+               className="w-full h-full object-cover bg-slate-800" 
+             />
+           )}
            <input type="file" accept="image/*" ref={fileInputRef} onChange={subirFoto} className="hidden" />
         </div>
       </header>
@@ -420,7 +382,7 @@ function App() {
                     </div>
                     <div>
                       <p className="font-bold text-sm leading-none mb-1">
-                         {i.descricao} {i.tagParcela && <span className="text-orange-400 ml-1 text-[10px]">({i.tagParcela})</span>}
+                         {i.descricao} {i.tagParcela && <span className="text-orange-500 ml-1 text-[10px]">({i.tagParcela})</span>}
                       </p>
                       <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.usuario} • {i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
                     </div>
@@ -442,12 +404,13 @@ function App() {
                <h1 className="text-4xl font-black mt-4">R$ {saldoCelio.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h1>
             </div>
             <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
+            {extratoCelioMes.length === 0 ? <p className={`text-center text-xs font-bold py-8 ${textMuted}`}>Nenhum gasto seu aqui.</p> : null}
             {extratoCelioMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <div>
                      <p className="font-bold text-sm">
                        {i.isVirtualContrato && <span className="mr-2">🔁</span>}
-                       {i.descricao} {i.tagParcela && <span className="text-orange-400 ml-1 text-[10px]">({i.tagParcela})</span>}
+                       {i.descricao} {i.tagParcela && <span className="text-orange-500 ml-1 text-[10px]">({i.tagParcela})</span>}
                      </p>
                      <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
                   </div>
@@ -494,12 +457,13 @@ function App() {
             </div>
             
             <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mb-4 ${textMuted}`}>Extrato de {nomeMesAtual}</h3>
+            {extratoBrendaMes.length === 0 ? <p className={`text-center text-xs font-bold py-8 ${textMuted}`}>Nenhum gasto dela aqui.</p> : null}
             {extratoBrendaMes.map(i => (
                 <div key={i.id} onClick={() => iniciarEdicao(i)} className={`p-4 rounded-[1.5rem] border flex justify-between items-center cursor-pointer ${bgCard}`}>
                   <div>
                      <p className="font-bold text-sm">
                        {i.isVirtualContrato && <span className="mr-2">🔁</span>}
-                       {i.descricao} {i.tagParcela && <span className="text-orange-400 ml-1 text-[10px]">({i.tagParcela})</span>}
+                       {i.descricao} {i.tagParcela && <span className="text-orange-500 ml-1 text-[10px]">({i.tagParcela})</span>}
                      </p>
                      <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
                   </div>
@@ -560,12 +524,12 @@ function App() {
             <h2 className="font-black text-2xl italic uppercase text-purple-500 mb-8">Ponto de Partida</h2>
             <div>
               <label className={`text-[9px] font-black uppercase block mb-2 ${textMuted}`}>Saldo no Banco (Ponto Zero)</label>
-              <input type="number" value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} placeholder="Pode deixar em branco ou 0" className={`w-full p-4 rounded-2xl border outline-none font-bold text-xl ${inputClass}`} />
+              <input type="number" value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} placeholder="Deixar vazio = 0" className={`w-full p-4 rounded-2xl border outline-none font-bold text-xl ${inputClass}`} />
             </div>
             <button onClick={async () => {
               await supabase.from('configuracoes').upsert({id: 1, ...config});
               mostrarAviso("Marco Zero salvo! 💾", "sucesso"); carregarDados();
-            }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95">💾 Salvar Ponto Zero</button>
+            }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95">💾 Salvar Alterações</button>
           </div>
         )}
       </main>
@@ -616,7 +580,7 @@ function App() {
               <div className="grid grid-cols-2 gap-3">
                  <select value={form.forma} onChange={e => setForm({...form, forma: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[9px] font-black uppercase ${inputClass}`}>
                     <option value="À Vista">💵 À Vista</option>
-                    <option value="Cartão de Crédito">💳 Cartão de Crédito</option>
+                    <option value="Cartão de Crédito">💳 Cartão</option>
                  </select>
                  <select value={form.previsibilidade} onChange={e => setForm({...form, previsibilidade: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[9px] font-black uppercase ${inputClass}`}>
                     <option value="Variável">🍔 Variável</option>
@@ -630,10 +594,9 @@ function App() {
                     <input type="date" value={form.data} onChange={e => setForm({...form, data: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-[10px] ${inputClass}`} required />
                  </div>
                  
-                 {/* NOVO: CAMPO DE PARCELAS */}
                  {form.forma === 'Cartão de Crédito' && (
                    <div className="animate-in fade-in">
-                      <label className={`text-[8px] font-black uppercase block mb-1 mt-2 text-orange-400`}>Quantas Parcelas?</label>
+                      <label className={`text-[8px] font-black uppercase block mb-1 mt-2 text-orange-500`}>Quantas Parcelas?</label>
                       <input type="number" min="1" max="120" value={form.parcelas_totais} onChange={e => setForm({...form, parcelas_totais: e.target.value})} className={`w-full p-4 rounded-2xl border border-orange-500/50 outline-none font-black text-lg text-orange-500 ${isDark ? 'bg-orange-500/10' : 'bg-orange-50'}`} />
                    </div>
                  )}
