@@ -122,11 +122,11 @@ function App() {
   const salvarGasto = async (e) => {
     e.preventDefault();
     
-    // FILTRO BLINDADO BRASIL (tira ponto de milhar e arruma vírgula)
+    // Filtro para não dar erro se colocar milhar com ponto (Ex: 1.200,00)
     const valorLimpo = String(form.valor).replace(/\./g, '').replace(',', '.');
     const vTotal = parseFloat(valorLimpo) || 0;
     
-    // TRAVA DE SEGURANÇA: Se for Variável ou não for Crédito, força a ser 1 parcela.
+    // TRAVA: Se for Variável ou não for Crédito, vira 1 parcela automaticamente
     let pTotal = Number(form.parcelas_totais) || 1;
     if (form.forma !== 'Cartão de Crédito' || form.previsibilidade === 'Variável') {
       pTotal = 1;
@@ -237,7 +237,7 @@ function App() {
               valor: l.valor_parcela, 
               isVirtualParcela: difMeses > 0, 
               tagParcela: `${parcelaAtual}/${pTotais}`,
-              valor_compra_total: l.valor // Guarda o valor total pra mostrar no extrato
+              valor_compra_total: l.valor
            });
         }
      }
@@ -507,6 +507,100 @@ function App() {
               <h3 className="font-black text-sm uppercase italic mb-4">Novo Contrato Fixo</h3>
               <input type="text" placeholder="Ex: Aluguel Betim, Salário" value={formContrato.descricao} onChange={e => setFormContrato({...formContrato, descricao: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-bold text-sm ${inputClass}`} required />
               <div className="grid grid-cols-2 gap-3">
+                 <input type="text" inputMode="decimal" placeholder="R$ 0,00" value={formContrato.valor} onChange={e => setFormContrato({...formContrato, valor: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-black text-lg ${inputClass}`} required />
+                 <select value={formContrato.tipo} onChange={e => setFormContrato({...formContrato, tipo: e.target.value})} className={`w-full p-4 rounded-xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
+                    <option value="despesa">💸 Pagar (Saída)</option>
+                    <option value="entrada">💰 Receber (Entrada)</option>
+                 </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <select value={formContrato.escopo} onChange={e => setFormContrato({...formContrato, escopo: e.target.value})} className={`w-full p-4 rounded-xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
+                   <option value="casal">🌍 Conta Casal</option>
+                   <option value="celio">💼 Pessoal Célio</option>
+                   <option value="brenda">🌸 Pessoal Brenda</option>
+                </select>
+                <input type="date" value={formContrato.data_inicio} onChange={e => setFormContrato({...formContrato, data_inicio: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-bold text-[10px] ${inputClass}`} required />
+              </div>
+              <button type="submit" className="w-full bg-yellow-500 text-black py-4 rounded-xl font-black text-xs uppercase shadow-xl active:scale-95 transition-transform mt-2">Ativar Conta Fixa</button>
+            </form>
+
+            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mt-8 mb-4 ${textMuted}`}>Contratos Ativos</h3>
+            <div className="space-y-3">
+              {contratos.map(c => (
+                <div key={c.id} className={`p-5 rounded-[1.5rem] border ${bgCard}`}>
+                  <div className="flex justify-between items-start mb-2">
+                     <div>
+                        <p className="font-black text-sm">{c.descricao}</p>
+                        <p className={`text-[9px] font-black uppercase ${textMuted}`}>Desde {new Date(c.data_inicio).toLocaleDateString('pt-BR')} • {c.escopo}</p>
+                     </div>
+                     <p className={`font-black text-lg ${c.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(c.valor).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                  </div>
+                  <button onClick={() => apagarContratoFixo(c.id)} className="text-[10px] font-black text-red-500 uppercase mt-2 bg-red-500/10 px-4 py-2 rounded-lg">Encerrar / Apagar</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {aba === 'CONFIG' && (
+          <div className={`p-8 rounded-[3rem] border space-y-6 ${bgCard}`}>
+            <h2 className="font-black text-2xl italic uppercase text-purple-500 mb-8">Ponto de Partida</h2>
+            <div>
+              <label className={`text-[9px] font-black uppercase block mb-2 ${textMuted}`}>Saldo no Banco (Ponto Zero)</label>
+              <input type="number" value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} placeholder="Deixar vazio = 0" className={`w-full p-4 rounded-2xl border outline-none font-bold text-xl ${inputClass}`} />
+            </div>
+            <button onClick={async () => {
+              await supabase.from('configuracoes').upsert({id: 1, ...config});
+              mostrarAviso("Marco Zero salvo! 💾", "sucesso"); carregarDados();
+            }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95">💾 Salvar Alterações</button>
+          </div>
+        )}
+      </main>
+
+      {aba !== 'CONTRATOS' && (
+        <button onClick={() => setShowModal(true)} className="fixed bottom-8 left-1/2 -translate-x-1/2 w-16 h-16 bg-gradient-to-tr from-purple-700 to-purple-500 text-white rounded-full shadow-[0_10px_40px_rgba(147,51,234,0.6)] flex items-center justify-center text-3xl font-bold z-40 active:scale-90 transition-transform">
+          +
+        </button>
+      )}
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+          <div className={`w-full max-w-sm p-8 rounded-[3rem] border shadow-2xl ${isDark ? 'bg-[#121418] border-white/10' : 'bg-white border-slate-200'}`}>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-black text-xl italic uppercase">
+                {editingEntryId ? 'Editar Lançamento' : 'Gasto Avulso'}
+              </h3>
+              <button onClick={fecharModal} className={`text-2xl ${textMuted}`}>✕</button>
+            </div>
+            
+            <form onSubmit={salvarGasto} className="space-y-4">
+              <div>
+                <select value={form.escopo} onChange={e => setForm({...form, escopo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[11px] font-black uppercase ${inputClass}`}>
+                   <option value="casal">🌍 Conta Central do Casal</option>
+                   <option value="celio">💼 Carteira Pessoal - Célio</option>
+                   <option value="brenda">🌸 Carteira Pessoal - Brenda</option>
+                </select>
+              </div>
+
+              {form.escopo === 'casal' && (
+                <div className={`flex gap-2 p-1 rounded-2xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                  {['Célio', 'Brenda'].map(u => (
+                    <button key={u} type="button" onClick={() => setForm({...form, usuario: u})} className={`flex-1 py-3 rounded-xl text-[10px] font-black transition-all ${form.usuario === u ? (isDark ? 'bg-white text-black shadow-md' : 'bg-slate-800 text-white shadow-md') : textMuted}`}>{u.toUpperCase()}</button>
+                  ))}
+                </div>
+              )}
+
+              <input type="text" placeholder="O que foi? (Ex: Carro, iFood)" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold ${inputClass}`} required />
+              
+              <div className="grid grid-cols-2 gap-3">
+                 <input type="text" inputMode="decimal" placeholder="R$ Total" value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-black text-xl ${inputClass}`} required />
+                 <select value={form.tipo} onChange={e => setForm({...form, tipo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
+                    <option value="despesa">💸 Saída</option>
+                    <option value="entrada">💰 Entrada</option>
+                 </select>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
                  <select value={form.forma} onChange={e => {
                      const val = e.target.value;
                      setForm({...form, forma: val, parcelas_totais: val !== 'Cartão de Crédito' ? 1 : form.parcelas_totais});
@@ -529,7 +623,6 @@ function App() {
                     <input type="date" value={form.data} onChange={e => setForm({...form, data: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-[10px] ${inputClass}`} required />
                  </div>
                  
-                 {/* NOVO: CAMPO DE PARCELAS CONDICIONADO A CRÉDITO + FIXA */}
                  {form.forma === 'Cartão de Crédito' && form.previsibilidade === 'Fixa' && (
                    <div className="animate-in fade-in">
                       <label className={`text-[8px] font-black uppercase block mb-1 mt-2 text-orange-500`}>Quantas Parcelas?</label>
@@ -538,7 +631,6 @@ function App() {
                  )}
               </div>
 
-              {/* O NOVO AVISO DE CÁLCULO EXPLICATIVO TAMBÉM CONDICIONADO */}
               {form.forma === 'Cartão de Crédito' && form.previsibilidade === 'Fixa' && Number(form.parcelas_totais) > 1 && (
                  <div className={`p-3 rounded-xl border text-center mt-2 ${isDark ? 'bg-orange-500/10 border-orange-500/20' : 'bg-orange-50 border-orange-200'}`}>
                     <p className="text-[10px] font-black text-orange-500 uppercase">
