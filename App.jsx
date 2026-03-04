@@ -18,12 +18,15 @@ function App() {
   const [lancamentos, setLancamentos] = useState(() => {
     const salvo = localStorage.getItem('@financasCB:lancamentos'); return salvo ? JSON.parse(salvo) : [];
   });
+  
   const [contratos, setContratos] = useState(() => {
     const salvo = localStorage.getItem('@financasCB:contratos'); return salvo ? JSON.parse(salvo) : [];
   });
+  
   const [config, setConfig] = useState(() => {
     const salvo = localStorage.getItem('@financasCB:config'); return salvo ? JSON.parse(salvo) : { saldo_inicial: 0, data_inicio: '' };
   });
+  
   const [ciclo, setCiclo] = useState(() => {
     const salvo = localStorage.getItem('@financasCB:ciclo'); return salvo ? JSON.parse(salvo) : { data_inicio: '', duracao: 28 };
   });
@@ -32,6 +35,7 @@ function App() {
   const [editingEntryId, setEditingEntryId] = useState(null);
   
   const dataHoje = new Date().toISOString().split('T')[0];
+  
   const [form, setForm] = useState({ 
     descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', 
     forma: 'À Vista', escopo: 'casal', previsibilidade: 'Variável', 
@@ -39,15 +43,14 @@ function App() {
   });
   
   const [formContrato, setFormContrato] = useState({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', escopo: 'casal', data_inicio: dataHoje });
+
   const [salvandoFoto, setSalvandoFoto] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Sincroniza a cor do fundo da página inteira para não dar tela cortada
   useEffect(() => {
     document.body.style.backgroundColor = tema === 'dark' ? '#0a0b0e' : '#f1f5f9';
   }, [tema]);
 
-  // SENSOR DE SWIPE
   const [touchStart, setTouchStart] = useState(null);
   const [touchEnd, setTouchEnd] = useState(null);
   const minSwipeDistance = 50;
@@ -118,8 +121,17 @@ function App() {
 
   const salvarGasto = async (e) => {
     e.preventDefault();
-    const vTotal = parseFloat(String(form.valor).replace(',', '.'));
-    const pTotal = Number(form.parcelas_totais) || 1;
+    
+    // FILTRO BLINDADO BRASIL (tira ponto de milhar e arruma vírgula)
+    const valorLimpo = String(form.valor).replace(/\./g, '').replace(',', '.');
+    const vTotal = parseFloat(valorLimpo) || 0;
+    
+    // TRAVA DE SEGURANÇA: Se for Variável ou não for Crédito, força a ser 1 parcela.
+    let pTotal = Number(form.parcelas_totais) || 1;
+    if (form.forma !== 'Cartão de Crédito' || form.previsibilidade === 'Variável') {
+      pTotal = 1;
+    }
+
     const vParcela = pTotal > 1 ? (vTotal / pTotal) : vTotal;
 
     const dadosParaSalvar = { 
@@ -143,7 +155,8 @@ function App() {
 
   const salvarContratoFixo = async (e) => {
     e.preventDefault();
-    const v = parseFloat(String(formContrato.valor).replace(',', '.'));
+    const vLimpo = String(formContrato.valor).replace(/\./g, '').replace(',', '.');
+    const v = parseFloat(vLimpo) || 0;
     await supabase.from('contratos_fixos').insert([{ ...formContrato, valor: v }]);
     setFormContrato({ descricao: '', valor: '', tipo: 'despesa', usuario: 'Célio', escopo: 'casal', data_inicio: dataHoje });
     mostrarAviso("Conta Fixa ativada! Vai descontar sozinho agora. 🔁", "info");
@@ -159,10 +172,12 @@ function App() {
 
   const iniciarEdicao = (entry) => {
     if (entry.isVirtualContrato) return alert("Esta é uma Conta Fixa. Vá no menu 'Contas Fixas' para editá-la.");
-    if (entry.isVirtualParcela) return alert("Esta é uma parcela. Procure o mês da compra original para editar o valor total.");
+    if (entry.isVirtualParcela) return alert("Esta é uma parcela de crédito. Procure o mês da compra original para editar o valor total dela.");
+    
     setEditingEntryId(entry.id);
     setForm({
-      descricao: entry.descricao, valor: String(entry.valor).replace('.', ','),
+      descricao: entry.descricao, 
+      valor: String(entry.valor).replace('.', ','),
       tipo: entry.tipo, usuario: entry.usuario, forma: entry.forma_pagamento,
       escopo: entry.escopo, previsibilidade: entry.previsibilidade, data: entry.data_lancamento,
       parcelas_totais: entry.parcelas_totais || 1
@@ -191,7 +206,7 @@ function App() {
     carregarDados();
   };
 
-  // --- MOTOR MATEMÁTICO ---
+  // --- MOTOR MATEMÁTICO AVANÇADO ---
   const mesAnoFiltro = dataFiltro.toISOString().slice(0, 7); 
   const ultimoDiaDoMesVisualizado = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0).toISOString().split('T')[0];
   const nomeMeses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -217,8 +232,12 @@ function App() {
         const parcelaAtual = difMeses + 1; 
         if (difMeses >= 0 && parcelaAtual <= pTotais) {
            lancamentosExpandidos.push({
-              ...l, id: difMeses === 0 ? l.id : `parcela-${l.id}-${parcelaAtual}`,
-              valor: l.valor_parcela, isVirtualParcela: difMeses > 0, tagParcela: `${parcelaAtual}/${pTotais}`
+              ...l, 
+              id: difMeses === 0 ? l.id : `parcela-${l.id}-${parcelaAtual}`,
+              valor: l.valor_parcela, 
+              isVirtualParcela: difMeses > 0, 
+              tagParcela: `${parcelaAtual}/${pTotais}`,
+              valor_compra_total: l.valor // Guarda o valor total pra mostrar no extrato
            });
         }
      }
@@ -283,14 +302,12 @@ function App() {
     else { infoCiclo.fase = "🔄 Ciclo Atrasado"; infoCiclo.cor = "text-orange-500"; infoCiclo.diasProxima = 0; }
   }
 
-  // CLASSES DINÂMICAS PARA TEMA CLARO E ESCURO
   const isDark = tema === 'dark';
   const bgBody = isDark ? 'bg-[#0a0b0e]' : 'bg-slate-100';
   const textBody = isDark ? 'text-white' : 'text-slate-900';
   const bgMenu = isDark ? 'bg-[#121418] border-r border-white/5' : 'bg-white border-r border-slate-200 shadow-2xl';
   const bgCard = isDark ? 'bg-white/[0.03] border-white/5' : 'bg-white border-slate-200 shadow-sm';
   const textMuted = isDark ? 'opacity-40' : 'text-slate-500';
-  // Input class ajustada para ter contraste no tema escuro e claro
   const inputClass = isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400';
 
   return (
@@ -302,7 +319,6 @@ function App() {
         </div>
       )}
 
-      {/* MENU LATERAL */}
       <div className={`fixed inset-y-0 left-0 w-72 ${bgMenu} z-50 transform ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-500 p-8`}>
         <div className="flex justify-between items-center mb-10">
           <h2 className="font-black italic text-xl">MENU</h2>
@@ -323,13 +339,11 @@ function App() {
       <header className="p-6 flex justify-between items-center max-w-md mx-auto">
         <button onClick={() => setIsMenuOpen(true)} className={`text-2xl p-2 rounded-xl ${isDark ? 'bg-white/5' : 'bg-slate-200'}`}>☰</button>
         
-        {/* TEXTO DO CABEÇALHO 100% ALINHADO (CORRIGIDO) */}
         <div className="flex flex-col items-end justify-center mr-3 flex-1">
            <span className={`text-[10px] font-black uppercase leading-none mb-1 ${textMuted}`}>Olá, Casal</span>
            <span className="text-xs font-bold text-purple-500 italic leading-none">Célio & Brenda</span>
         </div>
         
-        {/* FOTO COM FALLBACK ANTI-QUEBRA */}
         <div onClick={() => !salvandoFoto && fileInputRef.current.click()} className={`w-12 h-12 rounded-full border-2 border-purple-600 overflow-hidden cursor-pointer shadow-lg relative flex items-center justify-center shrink-0 ${salvandoFoto ? 'animate-pulse bg-purple-900' : 'bg-slate-800'}`}>
            {salvandoFoto ? <span className="text-[8px] font-black text-white">⚙️</span> : (
              <img 
@@ -363,11 +377,11 @@ function App() {
             <div className="grid grid-cols-2 gap-4 mb-8">
                <div className={`p-5 rounded-[2rem] border ${bgCard}`}>
                   <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Fixas ({nomeMesAtual})</p>
-                  <p className="text-lg font-black text-red-500">R$ {despesasFixasMes.toFixed(2)}</p>
+                  <p className="text-lg font-black text-red-500">R$ {despesasFixasMes.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
                </div>
                <div className={`p-5 rounded-[2rem] border ${bgCard}`}>
                   <p className={`text-[9px] font-black uppercase mb-1 ${textMuted}`}>Variáveis ({nomeMesAtual})</p>
-                  <p className="text-lg font-black text-orange-400">R$ {despesasVariaveisMes.toFixed(2)}</p>
+                  <p className="text-lg font-black text-orange-400">R$ {despesasVariaveisMes.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
                </div>
             </div>
 
@@ -384,11 +398,14 @@ function App() {
                       <p className="font-bold text-sm leading-none mb-1">
                          {i.descricao} {i.tagParcela && <span className="text-orange-500 ml-1 text-[10px]">({i.tagParcela})</span>}
                       </p>
-                      <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.usuario} • {i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
+                      <p className={`text-[8px] font-black uppercase ${textMuted}`}>
+                         {i.usuario} • {i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}
+                         {i.valor_compra_total && ` • Total Compra: R$ ${Number(i.valor_compra_total).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`}
+                      </p>
                     </div>
                   </div>
                   <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>
-                    {i.tipo === 'entrada' ? '+' : '-'} R$ {Number(i.valor).toFixed(2)}
+                    {i.tipo === 'entrada' ? '+' : '-'} R$ {Number(i.valor).toLocaleString('pt-BR', {minimumFractionDigits: 2})}
                   </p>
                 </div>
               ))}
@@ -412,9 +429,12 @@ function App() {
                        {i.isVirtualContrato && <span className="mr-2">🔁</span>}
                        {i.descricao} {i.tagParcela && <span className="text-orange-500 ml-1 text-[10px]">({i.tagParcela})</span>}
                      </p>
-                     <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
+                     <p className={`text-[8px] font-black uppercase ${textMuted}`}>
+                        {i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}
+                        {i.valor_compra_total && ` • Total: R$ ${Number(i.valor_compra_total).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`}
+                     </p>
                   </div>
-                  <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
+                  <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
                 </div>
             ))}
           </div>
@@ -465,9 +485,12 @@ function App() {
                        {i.isVirtualContrato && <span className="mr-2">🔁</span>}
                        {i.descricao} {i.tagParcela && <span className="text-orange-500 ml-1 text-[10px]">({i.tagParcela})</span>}
                      </p>
-                     <p className={`text-[8px] font-black uppercase ${textMuted}`}>{i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}</p>
+                     <p className={`text-[8px] font-black uppercase ${textMuted}`}>
+                        {i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''}
+                        {i.valor_compra_total && ` • Total: R$ ${Number(i.valor_compra_total).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`}
+                     </p>
                   </div>
-                  <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toFixed(2)}</p>
+                  <p className={`font-black text-sm ${i.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(i.valor).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
                 </div>
             ))}
           </div>
@@ -484,105 +507,17 @@ function App() {
               <h3 className="font-black text-sm uppercase italic mb-4">Novo Contrato Fixo</h3>
               <input type="text" placeholder="Ex: Aluguel Betim, Salário" value={formContrato.descricao} onChange={e => setFormContrato({...formContrato, descricao: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-bold text-sm ${inputClass}`} required />
               <div className="grid grid-cols-2 gap-3">
-                 <input type="text" inputMode="decimal" placeholder="R$ 0,00" value={formContrato.valor} onChange={e => setFormContrato({...formContrato, valor: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-black text-lg ${inputClass}`} required />
-                 <select value={formContrato.tipo} onChange={e => setFormContrato({...formContrato, tipo: e.target.value})} className={`w-full p-4 rounded-xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
-                    <option value="despesa">💸 Pagar (Saída)</option>
-                    <option value="entrada">💰 Receber (Entrada)</option>
-                 </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <select value={formContrato.escopo} onChange={e => setFormContrato({...formContrato, escopo: e.target.value})} className={`w-full p-4 rounded-xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
-                   <option value="casal">🌍 Conta Casal</option>
-                   <option value="celio">💼 Pessoal Célio</option>
-                   <option value="brenda">🌸 Pessoal Brenda</option>
-                </select>
-                <input type="date" value={formContrato.data_inicio} onChange={e => setFormContrato({...formContrato, data_inicio: e.target.value})} className={`w-full p-4 rounded-xl border outline-none font-bold text-[10px] ${inputClass}`} required />
-              </div>
-              <button type="submit" className="w-full bg-yellow-500 text-black py-4 rounded-xl font-black text-xs uppercase shadow-xl active:scale-95 transition-transform mt-2">Ativar Conta Fixa</button>
-            </form>
-
-            <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] mt-8 mb-4 ${textMuted}`}>Contratos Ativos</h3>
-            <div className="space-y-3">
-              {contratos.map(c => (
-                <div key={c.id} className={`p-5 rounded-[1.5rem] border ${bgCard}`}>
-                  <div className="flex justify-between items-start mb-2">
-                     <div>
-                        <p className="font-black text-sm">{c.descricao}</p>
-                        <p className={`text-[9px] font-black uppercase ${textMuted}`}>Desde {new Date(c.data_inicio).toLocaleDateString('pt-BR')} • {c.escopo}</p>
-                     </div>
-                     <p className={`font-black text-lg ${c.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'}`}>R$ {Number(c.valor).toFixed(2)}</p>
-                  </div>
-                  <button onClick={() => apagarContratoFixo(c.id)} className="text-[10px] font-black text-red-500 uppercase mt-2 bg-red-500/10 px-4 py-2 rounded-lg">Encerrar / Apagar</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {aba === 'CONFIG' && (
-          <div className={`p-8 rounded-[3rem] border space-y-6 ${bgCard}`}>
-            <h2 className="font-black text-2xl italic uppercase text-purple-500 mb-8">Ponto de Partida</h2>
-            <div>
-              <label className={`text-[9px] font-black uppercase block mb-2 ${textMuted}`}>Saldo no Banco (Ponto Zero)</label>
-              <input type="number" value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} placeholder="Deixar vazio = 0" className={`w-full p-4 rounded-2xl border outline-none font-bold text-xl ${inputClass}`} />
-            </div>
-            <button onClick={async () => {
-              await supabase.from('configuracoes').upsert({id: 1, ...config});
-              mostrarAviso("Marco Zero salvo! 💾", "sucesso"); carregarDados();
-            }} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black text-[11px] uppercase mt-4 shadow-xl active:scale-95">💾 Salvar Alterações</button>
-          </div>
-        )}
-      </main>
-
-      {aba !== 'CONTRATOS' && (
-        <button onClick={() => setShowModal(true)} className="fixed bottom-8 left-1/2 -translate-x-1/2 w-16 h-16 bg-gradient-to-tr from-purple-700 to-purple-500 text-white rounded-full shadow-[0_10px_40px_rgba(147,51,234,0.6)] flex items-center justify-center text-3xl font-bold z-40 active:scale-90 transition-transform">
-          +
-        </button>
-      )}
-
-      {showModal && (
-        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-md">
-          <div className={`w-full max-w-sm p-8 rounded-[3rem] border shadow-2xl ${isDark ? 'bg-[#121418] border-white/10' : 'bg-white border-slate-200'}`}>
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-black text-xl italic uppercase">
-                {editingEntryId ? 'Editar Lançamento' : 'Gasto Avulso'}
-              </h3>
-              <button onClick={fecharModal} className={`text-2xl ${textMuted}`}>✕</button>
-            </div>
-            
-            <form onSubmit={salvarGasto} className="space-y-4">
-              <div>
-                <select value={form.escopo} onChange={e => setForm({...form, escopo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[11px] font-black uppercase ${inputClass}`}>
-                   <option value="casal">🌍 Conta Central do Casal</option>
-                   <option value="celio">💼 Carteira Pessoal - Célio</option>
-                   <option value="brenda">🌸 Carteira Pessoal - Brenda</option>
-                </select>
-              </div>
-
-              {form.escopo === 'casal' && (
-                <div className={`flex gap-2 p-1 rounded-2xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                  {['Célio', 'Brenda'].map(u => (
-                    <button key={u} type="button" onClick={() => setForm({...form, usuario: u})} className={`flex-1 py-3 rounded-xl text-[10px] font-black transition-all ${form.usuario === u ? (isDark ? 'bg-white text-black shadow-md' : 'bg-slate-800 text-white shadow-md') : textMuted}`}>{u.toUpperCase()}</button>
-                  ))}
-                </div>
-              )}
-
-              <input type="text" placeholder="O que foi? (Ex: Carro, iFood)" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold ${inputClass}`} required />
-              
-              <div className="grid grid-cols-2 gap-3">
-                 <input type="text" inputMode="decimal" placeholder="R$ Total" value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-black text-xl ${inputClass}`} required />
-                 <select value={form.tipo} onChange={e => setForm({...form, tipo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
-                    <option value="despesa">💸 Saída</option>
-                    <option value="entrada">💰 Entrada</option>
-                 </select>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                 <select value={form.forma} onChange={e => setForm({...form, forma: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[9px] font-black uppercase ${inputClass}`}>
+                 <select value={form.forma} onChange={e => {
+                     const val = e.target.value;
+                     setForm({...form, forma: val, parcelas_totais: val !== 'Cartão de Crédito' ? 1 : form.parcelas_totais});
+                 }} className={`w-full p-4 rounded-2xl border outline-none text-[9px] font-black uppercase ${inputClass}`}>
                     <option value="À Vista">💵 À Vista</option>
                     <option value="Cartão de Crédito">💳 Cartão</option>
                  </select>
-                 <select value={form.previsibilidade} onChange={e => setForm({...form, previsibilidade: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[9px] font-black uppercase ${inputClass}`}>
+                 <select value={form.previsibilidade} onChange={e => {
+                     const val = e.target.value;
+                     setForm({...form, previsibilidade: val, parcelas_totais: val === 'Variável' ? 1 : form.parcelas_totais});
+                 }} className={`w-full p-4 rounded-2xl border outline-none text-[9px] font-black uppercase ${inputClass}`}>
                     <option value="Variável">🍔 Variável</option>
                     <option value="Fixa">🏠 Fixa</option>
                  </select>
@@ -594,13 +529,23 @@ function App() {
                     <input type="date" value={form.data} onChange={e => setForm({...form, data: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold text-[10px] ${inputClass}`} required />
                  </div>
                  
-                 {form.forma === 'Cartão de Crédito' && (
+                 {/* NOVO: CAMPO DE PARCELAS CONDICIONADO A CRÉDITO + FIXA */}
+                 {form.forma === 'Cartão de Crédito' && form.previsibilidade === 'Fixa' && (
                    <div className="animate-in fade-in">
                       <label className={`text-[8px] font-black uppercase block mb-1 mt-2 text-orange-500`}>Quantas Parcelas?</label>
-                      <input type="number" min="1" max="120" value={form.parcelas_totais} onChange={e => setForm({...form, parcelas_totais: e.target.value})} className={`w-full p-4 rounded-2xl border border-orange-500/50 outline-none font-black text-lg text-orange-500 ${isDark ? 'bg-orange-500/10' : 'bg-orange-50'}`} />
+                      <input type="number" min="1" max="18" value={form.parcelas_totais} onChange={e => setForm({...form, parcelas_totais: e.target.value})} className={`w-full p-4 rounded-2xl border border-orange-500/50 outline-none font-black text-lg text-orange-500 ${isDark ? 'bg-orange-500/10' : 'bg-orange-50'}`} />
                    </div>
                  )}
               </div>
+
+              {/* O NOVO AVISO DE CÁLCULO EXPLICATIVO TAMBÉM CONDICIONADO */}
+              {form.forma === 'Cartão de Crédito' && form.previsibilidade === 'Fixa' && Number(form.parcelas_totais) > 1 && (
+                 <div className={`p-3 rounded-xl border text-center mt-2 ${isDark ? 'bg-orange-500/10 border-orange-500/20' : 'bg-orange-50 border-orange-200'}`}>
+                    <p className="text-[10px] font-black text-orange-500 uppercase">
+                       💳 A compra será dividida em {form.parcelas_totais}x de R$ {((parseFloat(String(form.valor).replace(/\./g, '').replace(',', '.')) || 0) / Number(form.parcelas_totais)).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} no extrato.
+                    </p>
+                 </div>
+              )}
 
               <div className="flex gap-3 mt-6 pt-6 border-t border-gray-500/10">
                   {editingEntryId && (
