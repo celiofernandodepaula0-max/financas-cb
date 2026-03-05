@@ -55,17 +55,14 @@ function App() {
   const [touchEnd, setTouchEnd] = useState(null);
   const minSwipeDistance = 50;
 
-  // NOVO: Estado que controla o tipo e direção da animação
   const [direcaoAnimacao, setDirecaoAnimacao] = useState('fade-in');
 
-  // NOVO: Função para animar a troca de abas no Menu (vem de baixo)
   const mudarAba = (novaAba) => {
     setDirecaoAnimacao('fade-in slide-in-from-bottom-8');
     setAba(novaAba);
     setIsMenuOpen(false);
   };
 
-  // NOVO: Funções de navegação com animação lateral (Swipe)
   const irMesAnterior = () => {
     setDirecaoAnimacao('slide-in-from-left-8 fade-in');
     setDataFiltro(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
@@ -100,7 +97,6 @@ function App() {
       setContratos(ct); localStorage.setItem('@financasCB:contratos', JSON.stringify(ct)); 
       const diaHoje = new Date().getDate();
       const temContaPerto = ct.some(conta => {
-        // Usa a data real definida no contrato para verificar proximidade
         const diaConta = new Date(conta.data_inicio + 'T00:00:00').getDate();
         return conta.tipo === 'despesa' && (diaConta === diaHoje || diaConta === diaHoje + 1 || diaConta === diaHoje - 1);
       });
@@ -146,11 +142,9 @@ function App() {
   const salvarGasto = async (e) => {
     e.preventDefault();
     
-    // Filtro para não dar erro se colocar milhar com ponto (Ex: 1.200,00)
     const valorLimpo = String(form.valor).replace(/\./g, '').replace(',', '.');
     const vTotal = parseFloat(valorLimpo) || 0;
     
-    // TRAVA: Se for Variável ou não for Crédito, vira 1 parcela automaticamente
     let pTotal = Number(form.parcelas_totais) || 1;
     if (form.forma !== 'Cartão de Crédito' || form.previsibilidade === 'Variável') {
       pTotal = 1;
@@ -230,7 +224,7 @@ function App() {
     carregarDados();
   };
 
-  // --- MOTOR MATEMÁTICO AVANÇADO (AGORA COM PRECISÃO DE DIAS) ---
+  // --- MOTOR MATEMÁTICO AVANÇADO ---
   const mesAnoFiltro = dataFiltro.toISOString().slice(0, 7); 
   const ultimoDiaDoMesVisualizado = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0).toISOString().split('T')[0];
   const nomeMeses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -239,7 +233,6 @@ function App() {
   const calcularDiferencaMeses = (dataInicioStr) => {
     if (!dataInicioStr) return -1;
     const inicio = new Date(dataInicioStr + 'T00:00:00');
-    // Para contratos, avaliamos o mês em si, mantendo a capacidade de cobrar na data futura
     const filtro = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0); 
     if (inicio > filtro) return -1; 
     const anos = filtro.getFullYear() - inicio.getFullYear();
@@ -257,14 +250,11 @@ function App() {
         const difMeses = calcularDiferencaMeses(dLancOriginal);
         const parcelaAtual = difMeses + 1; 
         if (difMeses >= 0 && parcelaAtual <= pTotais) {
-           // Calcula o dia original para manter o vencimento nas parcelas seguintes
            let diaOriginal = "01";
            if(dLancOriginal) {
                const partesData = dLancOriginal.split('-');
                if(partesData.length === 3) diaOriginal = partesData[2];
            }
-           
-           // Evita que dia 31 de Janeiro vire algo inválido em Fevereiro
            const diasNoMesFiltro = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0).getDate();
            const diaFinal = Math.min(parseInt(diaOriginal, 10), diasNoMesFiltro).toString().padStart(2, '0');
 
@@ -275,7 +265,6 @@ function App() {
               isVirtualParcela: difMeses > 0, 
               tagParcela: `${parcelaAtual}/${pTotais}`,
               valor_compra_total: l.valor,
-              // Mantém o dia de pagamento na data projetada!
               data_lancamento: `${mesAnoFiltro}-${diaFinal}` 
            });
         }
@@ -283,14 +272,11 @@ function App() {
   });
 
   const contratosVirtuais = contratos.filter(c => calcularDiferencaMeses(c.data_inicio) >= 0).map(c => {
-     // Preserva o dia em que o contrato foi configurado
      let diaContrato = "01";
      if(c.data_inicio) {
          const partes = c.data_inicio.split('-');
          if(partes.length === 3) diaContrato = partes[2];
      }
-     
-     // Garante que o dia ajustado exista no mês (ex: 31 de fev vira 28)
      const diasNoMesFiltro = new Date(dataFiltro.getFullYear(), dataFiltro.getMonth() + 1, 0).getDate();
      const diaFinal = Math.min(parseInt(diaContrato, 10), diasNoMesFiltro).toString().padStart(2, '0');
 
@@ -298,7 +284,7 @@ function App() {
          ...c, 
          id: 'virtual-ct-' + c.id, 
          isVirtualContrato: true, 
-         data_lancamento: `${mesAnoFiltro}-${diaFinal}`, // Agora a data bate certinho no extrato!
+         data_lancamento: `${mesAnoFiltro}-${diaFinal}`, 
          forma_pagamento: 'Débito Recorrente', 
          previsibilidade: 'Fixa'
      }
@@ -455,7 +441,6 @@ function App() {
                          {i.descricao} {i.tagParcela && <span className="text-orange-500 ml-1 text-[10px]">({i.tagParcela})</span>}
                       </p>
                       <p className={`text-[8px] font-black uppercase ${textMuted}`}>
-                         {/* MOSTRA O DIA DO VENCIMENTO DA CONTA/PARCELA DE FORMA CLARA */}
                          Vencimento: {i.data_lancamento ? i.data_lancamento.split('-').reverse().join('/') : ''} • {i.usuario}
                          {i.valor_compra_total && ` • Total: R$ ${Number(i.valor_compra_total).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`}
                       </p>
@@ -498,7 +483,7 @@ function App() {
         )}
 
         {aba === 'BRENDA' && (
-          <div className="animate-in fade-in duration-500 space-y-8">
+          <div key={mesAnoFiltro + 'BRENDA'} className={`animate-in ${direcaoAnimacao} duration-300 ease-out space-y-8`}>
             <div className="bg-pink-600 text-white p-8 rounded-[3rem] shadow-xl text-center">
                <p className="text-[10px] font-black opacity-60 uppercase mb-1">Acumulado Geral</p>
                <h2 className="font-black text-2xl uppercase italic">Caixa Pessoal Brenda</h2>
@@ -554,7 +539,7 @@ function App() {
         )}
 
         {aba === 'CONTRATOS' && (
-          <div className="animate-in fade-in duration-500 space-y-6">
+          <div key="CONTRATOS" className={`animate-in ${direcaoAnimacao} duration-300 ease-out space-y-6`}>
             <div className="bg-yellow-600 text-white p-8 rounded-[3rem] shadow-xl mb-8">
                <h2 className="font-black text-2xl uppercase italic mb-2">Contas Fixas</h2>
                <p className="text-xs font-bold opacity-80">Cadastre Salários, Aluguéis ou Assinaturas eternas. Elas cairão na conta automaticamente na data de vencimento todos os meses.</p>
@@ -598,13 +583,13 @@ function App() {
                   <button onClick={() => apagarContratoFixo(c.id)} className="text-[10px] font-black text-red-500 uppercase mt-2 bg-red-500/10 px-4 py-2 rounded-lg">Encerrar / Apagar</button>
                 </div>
               ))}
+            </div>
           </div>
         )}
 
-        {aba === 'BRENDA' && (
-          <div key={mesAnoFiltro + 'BRENDA'} className={`animate-in ${direcaoAnimacao} duration-300 ease-out space-y-8`}>
-            <div className="bg-pink-600 text-white p-8 rounded-[3rem] shadow-xl text-center">
-               <p className="text-[10px] font-black opacity-60 uppercase mb-1">Acumulado Geral</p>
+        {aba === 'CONFIG' && (
+          <div key="CONFIG" className={`animate-in ${direcaoAnimacao} duration-300 ease-out p-8 rounded-[3rem] border space-y-6 ${bgCard}`}>
+            <h2 className="font-black text-2xl italic uppercase text-purple-500 mb-8">Ponto de Partida</h2>
             <div>
               <label className={`text-[9px] font-black uppercase block mb-2 ${textMuted}`}>Saldo no Banco (Ponto Zero)</label>
               <input type="number" value={config.saldo_inicial} onChange={e => setConfig({...config, saldo_inicial: e.target.value})} placeholder="Deixar vazio = 0" className={`w-full p-4 rounded-2xl border outline-none font-bold text-xl ${inputClass}`} />
@@ -647,13 +632,13 @@ function App() {
                   {['Célio', 'Brenda'].map(u => (
                     <button key={u} type="button" onClick={() => setForm({...form, usuario: u})} className={`flex-1 py-3 rounded-xl text-[10px] font-black transition-all ${form.usuario === u ? (isDark ? 'bg-white text-black shadow-md' : 'bg-slate-800 text-white shadow-md') : textMuted}`}>{u.toUpperCase()}</button>
                   ))}
-          </div>
-        )}
+                </div>
+              )}
 
-        {aba === 'CONTRATOS' && (
-          <div key="CONTRATOS" className={`animate-in ${direcaoAnimacao} duration-300 ease-out space-y-6`}>
-            <div className="bg-yellow-600 text-white p-8 rounded-[3rem] shadow-xl mb-8">
-               <h2 className="font-black text-2xl uppercase italic mb-2">Contas Fixas</h2>
+              <input type="text" placeholder="O que foi? (Ex: Carro, iFood)" value={form.descricao} onChange={e => setForm({...form, descricao: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-bold ${inputClass}`} required />
+              
+              <div className="grid grid-cols-2 gap-3">
+                 <input type="text" inputMode="decimal" placeholder="R$ Total" value={form.valor} onChange={e => setForm({...form, valor: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none font-black text-xl ${inputClass}`} required />
                  <select value={form.tipo} onChange={e => setForm({...form, tipo: e.target.value})} className={`w-full p-4 rounded-2xl border outline-none text-[10px] font-black uppercase ${inputClass}`}>
                     <option value="despesa">💸 Saída</option>
                     <option value="entrada">💰 Entrada</option>
@@ -671,15 +656,14 @@ function App() {
                  <select value={form.previsibilidade} onChange={e => {
                      const val = e.target.value;
                      setForm({...form, previsibilidade: val, parcelas_totais: val === 'Variável' ? 1 : form.parcelas_totais});
-              ))}
-            </div>
-          </div>
-        )}
+                 }} className={`w-full p-4 rounded-2xl border outline-none text-[9px] font-black uppercase ${inputClass}`}>
+                    <option value="Variável">🍔 Variável</option>
+                    <option value="Fixa">🏠 Fixa</option>
+                 </select>
+              </div>
 
-        {aba === 'CONFIG' && (
-          <div key="CONFIG" className={`animate-in ${direcaoAnimacao} duration-300 ease-out p-8 rounded-[3rem] border space-y-6 ${bgCard}`}>
-            <h2 className="font-black text-2xl italic uppercase text-purple-500 mb-8">Ponto de Partida</h2>
-            <div>
+              <div className="grid grid-cols-2 gap-3">
+                 <div>
                     <label className={`text-[8px] font-black uppercase block mb-1 mt-2 ${textMuted}`}>
                        {form.forma === 'Cartão de Crédito' ? 'Venc. da Fatura' : 'Data da Compra'}
                     </label>
