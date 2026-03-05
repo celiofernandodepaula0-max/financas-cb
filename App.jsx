@@ -626,12 +626,12 @@ function App() {
                  {form.forma === 'Cartão de Crédito' && form.previsibilidade === 'Fixa' && (
                    <div className="animate-in fade-in">
                       <label className={`text-[8px] font-black uppercase block mb-1 mt-2 text-orange-500`}>Quantas Parcelas?</label>
-                      <input type="number" min="1" max="18" value={form.parcelas_totais} onChange={e => setForm({...form, parcelas_totais: e.target.value})} className={`w-full p-4 rounded-2xl border border-orange-500/50 outline-none font-black text-lg text-orange-500 ${isDark ? 'bg-orange-500/10' : 'bg-orange-50'}`} />
+                      <input type="number" min="1" max="120" value={form.parcelas_totais} onChange={e => setForm({...form, parcelas_totais: e.target.value})} className={`w-full p-4 rounded-2xl border border-orange-500/50 outline-none font-black text-lg text-orange-500 ${isDark ? 'bg-orange-500/10' : 'bg-orange-50'}`} />
                    </div>
                  )}
               </div>
 
-              {form.forma === 'Cartão de Crédito' && form.previsibilidade === 'Fixa' && Number(form.parcelas_totais) > 1 && (
+              {/* O NOVO AVISO DE CÁLCULO EXPLICATIVO TAMBÉM CONDICIONADO */}
                  <div className={`p-3 rounded-xl border text-center mt-2 ${isDark ? 'bg-orange-500/10 border-orange-500/20' : 'bg-orange-50 border-orange-200'}`}>
                     <p className="text-[10px] font-black text-orange-500 uppercase">
                        💳 A compra será dividida em {form.parcelas_totais}x de R$ {((parseFloat(String(form.valor).replace(/\./g, '').replace(',', '.')) || 0) / Number(form.parcelas_totais)).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} no extrato.
